@@ -170,14 +170,13 @@ void FullThreats::append_active_indices(Color perspective, const Position& pos, 
     auto process_pawn_attacks = [&](Color c, Direction attkDir) {
         const Bitboard cPawns  = pos.pieces(c, PAWN);
         const Bitboard attacks = shift(cPawns, attkDir) & pawnTargets;
-        for (Square to : attacks)
-        {
+        xstd::ranges::bit_for_each(attacks, [&](Square to) {
             Square    from     = to - attkDir;
             Piece     attacked = pos.piece_on(to);
             Piece     attacker = make_piece(c, PAWN);
             IndexType index    = make_index(perspective, attacker, from, to, attacked, ksq);
             active.push_back_if_lt(index, Dimensions);
-        }
+        });
     };
 
     process_pawn_attacks(WHITE, NORTH_EAST);
@@ -192,16 +191,14 @@ void FullThreats::append_active_indices(Color perspective, const Position& pos, 
         {
             Piece    attacker = make_piece(c, pt);
             Bitboard targets  = pt == KNIGHT || pt == QUEEN ? queenTargets : minorSliderTargets;
-            for (Square from : pos.pieces(c, pt))
-            {
+            xstd::ranges::bit_for_each(pos.pieces(c, pt), [&](Square from) {
                 Bitboard attacks = Attacks::attacks_bb(pt, from, occupied) & targets;
-                for (Square to : attacks)
-                {
+                xstd::ranges::bit_for_each(attacks, [&](Square to) {
                     Piece     attacked = pos.piece_on(to);
                     IndexType index    = make_index(perspective, attacker, from, to, attacked, ksq);
                     active.push_back_if_lt(index, Dimensions);
-                }
-            }
+                });
+            });
         }
     }
 }

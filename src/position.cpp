@@ -639,8 +639,7 @@ void Position::update_slider_blockers(Color c) const {
                      & pieces(~c);
     Bitboard occupancy = pieces() ^ snipers;
 
-    for (Square sniperSq : snipers)
-    {
+    xstd::ranges::bit_for_each(snipers, [&](Square sniperSq) {
         Bitboard b = between_bb(ksq, sniperSq) & occupancy;
 
         if (b.size() == 1)
@@ -649,7 +648,7 @@ void Position::update_slider_blockers(Color c) const {
             if (!(b & pieces(c)).empty())
                 st->pinners[~c] |= sniperSq;
         }
-    }
+    });
 }
 
 
@@ -1179,8 +1178,7 @@ void Position::update_piece_threats(Piece               pc,
     const Bitboard  sliders = (pieces(BISHOP, QUEEN) & bAttacks) | (pieces(ROOK, QUEEN) & rAttacks);
 
     auto process_sliders = [&](bool addDirectAttacks) {
-        for (Square sliderSq : sliders)
-        {
+        xstd::ranges::bit_for_each(sliders, [&](Square sliderSq) {
             Piece slider = piece_on(sliderSq);
 
             const Bitboard ray        = ray_pass_bb(sliderSq, s);
@@ -1197,7 +1195,7 @@ void Position::update_piece_threats(Piece               pc,
 
             if (addDirectAttacks && can_slider_threat(pc, slider))
                 add_dirty_threat(dts, putPiece, slider, pc, sliderSq, s);
-        }
+        });
     };
 
     // Kings emit no direct threats
@@ -1235,28 +1233,26 @@ void Position::update_piece_threats(Piece               pc,
     if constexpr (ComputeRay)
         process_sliders(false);
 #else
-    for (Square threatenedSq : threatened)
-    {
+    xstd::ranges::bit_for_each(threatened, [&](Square threatenedSq) {
         Piece threatenedPc = piece_on(threatenedSq);
         assert(threatenedSq != s);
         assert(threatenedPc != NO_PIECE);
 
         add_dirty_threat(dts, putPiece, pc, threatenedPc, s, threatenedSq);
-    }
+    });
 
     if constexpr (ComputeRay)
         process_sliders(true);
     else
         incomingThreats |= pt == QUEEN ? sliders & pieces(QUEEN) : sliders;
 
-    for (Square srcSq : incomingThreats)
-    {
+    xstd::ranges::bit_for_each(incomingThreats, [&](Square srcSq) {
         Piece srcPc = piece_on(srcSq);
         assert(srcSq != s);
         assert(srcPc != NO_PIECE);
 
         add_dirty_threat(dts, putPiece, srcPc, pc, srcSq, s);
-    }
+    });
 #endif
 }
 

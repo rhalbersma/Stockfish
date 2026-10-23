@@ -76,10 +76,12 @@ void PP_3Wide::append_active_indices(Color perspective, const Position& pos, Ind
     {
         Square         from = pop_lsb(bb);
         const Bitboard band = pawn_pair_bb(from);
-        for (Square to : (band & bb))
+        xstd::ranges::bit_for_each(band & bb, [&](Square to) {
             active.push_back(make_index(perspective, WHITE, from, to, WHITE, ksq));
-        for (Square to : (band & black))
+        });
+        xstd::ranges::bit_for_each(band & black, [&](Square to) {
             active.push_back(make_index(perspective, WHITE, from, to, BLACK, ksq));
+        });
     }
 
     bb = black;
@@ -87,8 +89,9 @@ void PP_3Wide::append_active_indices(Color perspective, const Position& pos, Ind
     {
         Square         from = pop_lsb(bb);
         const Bitboard band = pawn_pair_bb(from);
-        for (Square to : (band & bb))
+        xstd::ranges::bit_for_each(band & bb, [&](Square to) {
             active.push_back(make_index(perspective, BLACK, from, to, BLACK, ksq));
+        });
     }
 }
 
@@ -156,10 +159,12 @@ void PP_3Wide::append_changed_indices(Color                                    p
             const Square   a    = pop_lsb(u);
             const Bitboard mask = pawn_pair_bb(a) & (unchanged | u);
             const Color    aCol = pawnsB.contains(a) ? BLACK : WHITE;
-            for (Square b : (pawnsB & mask))
+            xstd::ranges::bit_for_each(pawnsB & mask, [&](Square b) {
                 push(make_index(perspective, aCol, a, b, BLACK, ksq));
-            for (Square w : (pawnsW & mask))
+            });
+            xstd::ranges::bit_for_each(pawnsW & mask, [&](Square w) {
                 push(make_index(perspective, aCol, a, w, WHITE, ksq));
+            });
         }
     };
 #endif
@@ -221,10 +226,10 @@ void PP_3Wide::append_changed_indices_both(Square                  white_ksq,
             const Bitboard mask  = pawn_pair_bb(from) & (unchanged | updated);
             const Color    color = pawnsB.contains(from) ? BLACK : WHITE;
 
-            for (Square paired : (pawnsB & mask))
-                push(color, from, paired, BLACK);
-            for (Square paired : (pawnsW & mask))
-                push(color, from, paired, WHITE);
+            xstd::ranges::bit_for_each(pawnsB & mask,
+                                       [&](Square paired) { push(color, from, paired, BLACK); });
+            xstd::ranges::bit_for_each(pawnsW & mask,
+                                       [&](Square paired) { push(color, from, paired, WHITE); });
         }
     };
 

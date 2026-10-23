@@ -67,14 +67,12 @@ inline Move* splat_moves(Move* moveList, Square from, Bitboard to_bb) {
 
 template<Direction offset>
 inline Move* splat_pawn_moves(Move* moveList, Bitboard to_bb) {
-    for (Square to : to_bb)
-        *moveList++ = Move(to - offset, to);
+    xstd::ranges::bit_for_each(to_bb, [&](Square to) { *moveList++ = Move(to - offset, to); });
     return moveList;
 }
 
 inline Move* splat_moves(Move* moveList, Square from, Bitboard to_bb) {
-    for (Square to : to_bb)
-        *moveList++ = Move(from, to);
+    xstd::ranges::bit_for_each(to_bb, [&](Square to) { *moveList++ = Move(from, to); });
     return moveList;
 }
 
@@ -149,14 +147,14 @@ Move* generate_pawn_moves(const Position& pos, Move* moveList, Bitboard target) 
         if constexpr (Type == EVASIONS)
             b3 &= target;
 
-        for (Square to : b1)
-            moveList = make_promotions<Type, UpRight, true>(moveList, to);
+        xstd::ranges::bit_for_each(
+          b1, [&](Square to) { moveList = make_promotions<Type, UpRight, true>(moveList, to); });
 
-        for (Square to : b2)
-            moveList = make_promotions<Type, UpLeft, true>(moveList, to);
+        xstd::ranges::bit_for_each(
+          b2, [&](Square to) { moveList = make_promotions<Type, UpLeft, true>(moveList, to); });
 
-        for (Square to : b3)
-            moveList = make_promotions<Type, Up, false>(moveList, to);
+        xstd::ranges::bit_for_each(
+          b3, [&](Square to) { moveList = make_promotions<Type, Up, false>(moveList, to); });
     }
 
     // Standard and en passant captures
@@ -181,8 +179,8 @@ Move* generate_pawn_moves(const Position& pos, Move* moveList, Bitboard target) 
                   | (canCaptureLeft & shift(Bitboard{epSq}, -UpLeft)));
             assert(!b1.empty());
 
-            for (Square from : b1)
-                *moveList++ = Move::make<EN_PASSANT>(from, epSq);
+            xstd::ranges::bit_for_each(
+              b1, [&](Square from) { *moveList++ = Move::make<EN_PASSANT>(from, epSq); });
         }
     }
 
@@ -198,22 +196,20 @@ Move* generate_moves(const Position& pos, Move* moveList, Bitboard target, Color
     const Square   ksq    = pos.square<KING>(us);
     const Bitboard pinned = pos.blockers_for_king(us);
 
-    for (Square from : pos.pieces(us, Pt) - pinned)
-    {
+    xstd::ranges::bit_for_each(pos.pieces(us, Pt) - pinned, [&](Square from) {
         Bitboard b = Attacks::attacks_bb(Pt, from, pos.pieces()) & target;
 
         moveList = splat_moves(moveList, from, b);
-    }
+    });
 
     if constexpr (Pt != KNIGHT)  // pinned knights cannot move
     {
-        for (Square from : pos.pieces(us, Pt) & pinned)
-        {
+        xstd::ranges::bit_for_each(pos.pieces(us, Pt) & pinned, [&](Square from) {
             Bitboard b = Attacks::attacks_bb(Pt, from, pos.pieces()) & target;
             b &= Attacks::line_bb(ksq, from);
 
             moveList = splat_moves(moveList, from, b);
-        }
+        });
     }
 
     return moveList;

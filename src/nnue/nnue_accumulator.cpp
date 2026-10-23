@@ -762,26 +762,22 @@ void update_accumulator_hybrid(Color                     perspective,
     PSQFeatureSet::write_indices(newEntry.pieces, currentPieces, newRemovedBB, newAddedBB,
                                  perspective, newKsq, opponentHasQueen, newRemove, newAdd);
 #else
-    for (Square sq : oldRemovedBB)
-    {
+    xstd::ranges::bit_for_each(oldRemovedBB, [&](Square sq) {
         oldRemove.push_back(PSQFeatureSet::make_index(perspective, sq, oldEntry.pieces[sq], oldKsq,
                                                       opponentHasQueen));
-    }
-    for (Square sq : oldAddedBB)
-    {
+    });
+    xstd::ranges::bit_for_each(oldAddedBB, [&](Square sq) {
         oldAdd.push_back(
           PSQFeatureSet::make_index(perspective, sq, previousPieces[sq], oldKsq, opponentHasQueen));
-    }
-    for (Square sq : newRemovedBB)
-    {
+    });
+    xstd::ranges::bit_for_each(newRemovedBB, [&](Square sq) {
         newRemove.push_back(PSQFeatureSet::make_index(perspective, sq, newEntry.pieces[sq], newKsq,
                                                       opponentHasQueen));
-    }
-    for (Square sq : newAddedBB)
-    {
+    });
+    xstd::ranges::bit_for_each(newAddedBB, [&](Square sq) {
         newAdd.push_back(
           PSQFeatureSet::make_index(perspective, sq, currentPieces[sq], newKsq, opponentHasQueen));
-    }
+    });
 #endif
 
     ThreatFeatureSet::IndexList thrRemoved, thrAdded;  // also contain pp indices
@@ -858,16 +854,14 @@ void update_accumulator_refresh_cache(Color                     perspective,
     PSQFeatureSet::write_indices(entry.pieces, pos.piece_array(), removedBB, addedBB, perspective,
                                  ksq, opponentHasQueen, removed, added);
 #else
-    for (Square sq : removedBB)
-    {
+    xstd::ranges::bit_for_each(removedBB, [&](Square sq) {
         removed.push_back(
           PSQFeatureSet::make_index(perspective, sq, entry.pieces[sq], ksq, opponentHasQueen));
-    }
-    for (Square sq : addedBB)
-    {
+    });
+    xstd::ranges::bit_for_each(addedBB, [&](Square sq) {
         added.push_back(
           PSQFeatureSet::make_index(perspective, sq, pos.piece_on(sq), ksq, opponentHasQueen));
-    }
+    });
 #endif
 
     entry.pieceBB = pos.pieces();

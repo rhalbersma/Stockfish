@@ -25,6 +25,7 @@
 #include <string>
 
 #include <xstd/bits/bit/bit_convert.hpp>
+#include <xstd/bits/bit_algorithm/bit_for_each.hpp>
 #include <xstd/bits/bit_ranges/from_blocks.hpp>
 
 #include "types.h"

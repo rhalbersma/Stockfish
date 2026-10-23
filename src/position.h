@@ -301,8 +301,8 @@ inline Bitboard Position::xattacks_by(PieceType pt, Color c, Bitboard occupied) 
     else
     {
         Bitboard threats;
-        for (Square s : pieces(c, pt))
-            threats |= Attacks::attacks_bb(pt, s, occupied);
+        xstd::ranges::bit_for_each(
+          pieces(c, pt), [&](Square s) { threats |= Attacks::attacks_bb(pt, s, occupied); });
         return threats;
     }
 }
