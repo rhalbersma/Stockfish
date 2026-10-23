@@ -6,7 +6,7 @@ on:
 jobs:
   Matetrack:
     name: Matetrack
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
@@ -17,10 +17,23 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: Stockfish
           persist-credentials: false
+          submodules: true
+
+      # GCC 15 is xstd-bits' stable rung; the runner's default GCC cannot build C++23.
+      - name: Install GCC 15
+        uses: rhalbersma/cpp-ci/.github/actions/install-gcc@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+        with:
+          version: "15"
+          trunk: "false"
+
+      - name: Install Boost headers
+        run: |
+          Stockfish/.github/ci/install_boost_headers.sh "$RUNNER_TEMP/boost"
+          echo "BOOST_INCLUDE=$RUNNER_TEMP/boost" >> $GITHUB_ENV
 
       - name: build SF
         working-directory: Stockfish/src
-        run: make -j profile-build
+        run: make -j profile-build COMP=gcc COMPCXX=g++-15
 
       - name: Checkout matetrack repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

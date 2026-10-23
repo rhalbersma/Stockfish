@@ -36,6 +36,19 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          submodules: true
+
+      # GCC 15 is xstd-bits' stable rung; the runner's default GCC cannot build C++23.
+      - name: Install GCC 15
+        uses: rhalbersma/cpp-ci/.github/actions/install-gcc@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+        with:
+          version: "15"
+          trunk: "false"
+
+      - name: Install Boost headers
+        run: |
+          .github/ci/install_boost_headers.sh "$RUNNER_TEMP/boost"
+          echo "BOOST_INCLUDE=$RUNNER_TEMP/boost" >> $GITHUB_ENV
 
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL
@@ -51,7 +64,7 @@ jobs:
 
       - name: Build
         working-directory: src
-        run: make -j build
+        run: make -j build COMP=gcc COMPCXX=g++-15
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2

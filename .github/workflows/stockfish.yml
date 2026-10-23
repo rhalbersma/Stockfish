@@ -18,7 +18,7 @@ jobs:
   Prerelease:
     if: github.repository == 'official-stockfish/Stockfish' && github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-slim
-    needs: [Matrix, ARMCompilation, UniversalCompilation]
+    needs: [Matrix, UniversalCompilation]
     outputs:
       release_tag: ${{ steps.prerelease_metadata.outputs.release_tag }}
     permissions:
@@ -129,9 +129,7 @@ jobs:
           UNIVERSAL_MATRIX=$(jq -c '.' .github/ci/universal_matrix.json)
           echo "UNIVERSAL_MATRIX=$UNIVERSAL_MATRIX" >> $GITHUB_OUTPUT
   # Testing Jobs
-  IWYU:
-    name: IWYU
-    uses: ./.github/workflows/iwyu.yml
+  # IWYU dropped: its mapping is for libc++ at C++17, and this branch needs C++23 and xstd-bits' toolchain rungs.
   Sanitizers:
     name: Sanitizers
     if: ${{ always() }}
@@ -161,12 +159,7 @@ jobs:
     if: ${{ always() }}
     uses: ./.github/workflows/wasm_compilation.yml
   # Release Jobs
-  ARMCompilation:
-    name: Android builds
-    needs: [Matrix, Sanitizers, Tests, Matetrack, Games, CompilerCheck]
-    uses: ./.github/workflows/arm_compilation.yml
-    with:
-      matrix: ${{ needs.Matrix.outputs.arm_matrix }}
+  # Android builds (NDK) dropped, with their uploads: this branch needs C++23 and xstd-bits' toolchain rungs.
   UniversalCompilation:
     name: "Universal builds"
     needs: [Matrix, Sanitizers, Tests, Matetrack, Games, CompilerCheck]
@@ -184,22 +177,9 @@ jobs:
       contents: write # For uploading release assets
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
-  DevARMBinaries:
-    if: github.repository == 'official-stockfish/Stockfish'
-    name: Android uploads
-    needs: [Prerelease, Matrix, ARMCompilation]
-    uses: ./.github/workflows/upload_binaries.yml
-    with:
-      matrix: ${{ needs.Matrix.outputs.arm_matrix }}
-      release_tag: ${{ needs.Prerelease.outputs.release_tag }}
-      release_prerelease: true
-    permissions:
-      contents: write # For uploading release assets
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
   PublishPrerelease:
     if: github.repository == 'official-stockfish/Stockfish' && needs.Prerelease.outputs.release_tag != ''
-    needs: [Prerelease, DevBinaries, DevARMBinaries]
+    needs: [Prerelease, DevBinaries]
     runs-on: ubuntu-slim
     permissions:
       contents: write # For publishing the draft prerelease

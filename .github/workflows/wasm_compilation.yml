@@ -20,14 +20,21 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          submodules: true
 
+      # Emscripten 6.0.12 is xstd-bits' rung
       - name: Install emsdk
         working-directory: .
         run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git
+          git clone --depth 1 --branch 6.0.12 https://github.com/emscripten-core/emsdk.git
           cd emsdk
-          ./emsdk install latest
-          ./emsdk activate latest
+          ./emsdk install 6.0.12
+          ./emsdk activate 6.0.12
+
+      - name: Install Boost headers
+        run: |
+          ../.github/ci/install_boost_headers.sh "$RUNNER_TEMP/boost"
+          echo "BOOST_INCLUDE=$RUNNER_TEMP/boost" >> $GITHUB_ENV
 
       - name: Extract the bench number from the commit history
         run: |

@@ -13,9 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - name: Ubuntu 22.04 GCC
-            os: ubuntu-22.04
-            compiler: g++
+          # GCC 15 is xstd-bits' stable rung; the default GCC 11 of ubuntu-22.04 cannot build C++23.
+          - name: Ubuntu 24.04 GCC 15
+            os: ubuntu-24.04
+            compiler: g++-15
             comp: gcc
             shell: bash
         sanitizers:
@@ -51,6 +52,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          submodules: true
 
       - name: Cache syzygy test data
         id: cache-syzygy-test
@@ -63,6 +65,17 @@ jobs:
         run: |
           sudo apt update
           sudo apt install expect valgrind g++-multilib
+
+      - name: Install GCC 15
+        uses: rhalbersma/cpp-ci/.github/actions/install-gcc@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+        with:
+          version: "15"
+          trunk: "false"
+
+      - name: Install Boost headers
+        run: |
+          ../.github/ci/install_boost_headers.sh "$RUNNER_TEMP/boost"
+          echo "BOOST_INCLUDE=$RUNNER_TEMP/boost" >> $GITHUB_ENV
 
       - name: Download the used network from the fishtest framework
         run: make net

@@ -13,98 +13,61 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - name: Ubuntu 22.04 GCC
-            os: ubuntu-22.04
-            compiler: g++
+          # Android NDK, ppc64, loongarch64, Mingw-w64 i686 and Clang legs dropped: this branch needs C++23 and xstd-bits' rungs.
+          - name: Ubuntu 24.04 GCC 15
+            os: ubuntu-24.04
+            compiler: g++-15
             comp: gcc
+            gcc: "15"
             run_32bit_tests: true
             run_64bit_tests: true
             shell: bash
-          - name: Ubuntu 22.04 Clang
-            os: ubuntu-22.04
-            compiler: clang++
+          - name: Ubuntu 24.04 Clang 22
+            os: ubuntu-24.04
+            compiler: clang++-22
             comp: clang
+            gcc: "15"
+            clang: "22"
+            llvm_suffix: "-22"
             run_32bit_tests: true
             run_64bit_tests: true
             shell: bash
-          - name: Android NDK aarch64
-            os: ubuntu-22.04
-            compiler: aarch64-linux-android29-clang++
-            comp: ndk
-            run_armv8_tests: true
-            shell: bash
-          - name: Android NDK arm
-            os: ubuntu-22.04
-            compiler: armv7a-linux-androideabi29-clang++
-            comp: ndk
-            run_armv7_tests: true
-            shell: bash
-          - name: Linux GCC ppc64
-            os: ubuntu-22.04
-            compiler: g++
-            comp: gcc
-            run_ppc64_tests: true
-            base_image: "ppc64le/alpine:latest"
-            platform: linux/ppc64le
-            shell: bash
-          - name: Linux GCC loongarch64
-            os: ubuntu-22.04
-            compiler: g++
-            comp: gcc
-            run_loongarch64_tests: true
-            base_image: "loongarch64/alpine:3.21"
-            platform: linux/loong64
-            shell: bash
-          - name: macOS 15 Apple Clang
+          - name: macOS 15 Apple Clang 17 (Xcode 16.4)
             os: macos-15-intel
             compiler: clang++
             comp: clang
+            developer_dir: /Applications/Xcode_16.4.app/Contents/Developer
             run_64bit_tests: true
             shell: bash
-          - name: macOS 15 Apple Clang M1
-            os: macos-15
+          - name: macOS 26 Apple Clang 21 (Xcode 26.6) M1
+            os: macos-26
             compiler: clang++
             comp: clang
+            developer_dir: /Applications/Xcode_26.6.app/Contents/Developer
             run_64bit_tests: false
             run_m1_tests: true
             shell: bash
-          - name: macOS 15 GCC 11
+          - name: macOS 15 GCC 15
             os: macos-15-intel
-            compiler: g++-11
+            compiler: g++-15
             comp: gcc
             run_64bit_tests: true
             shell: bash
-          - name: Windows 2022 Mingw-w64 GCC x86_64
+          - name: Windows 2022 Mingw-w64 GCC 15 x86_64
             os: windows-2022
             compiler: g++
             comp: mingw
+            winlibs: "15."
             run_64bit_tests: true
             msys_sys: mingw64
-            msys_env: x86_64-gcc
             shell: msys2 {0}
-          - name: Windows 2022 Mingw-w64 GCC i686
+          - name: Windows 2022 Mingw-w64 GCC 16 x86_64
             os: windows-2022
             compiler: g++
             comp: mingw
-            run_32bit_tests: true
-            msys_sys: mingw32
-            msys_env: i686-gcc
-            shell: msys2 {0}
-          - name: Windows 2022 Mingw-w64 Clang x86_64
-            os: windows-2022
-            compiler: clang++
-            comp: clang
+            winlibs: "16."
             run_64bit_tests: true
-            msys_sys: clang64
-            msys_env: clang-x86_64-clang
-            shell: msys2 {0}
-          - name: Windows 11 Mingw-w64 Clang arm64
-            os: windows-11-arm
-            compiler: clang++
-            comp: clang
-            run_armv8_tests: true
-            msys_sys: clangarm64
-            msys_env: clang-aarch64-clang
+            msys_sys: mingw64
             shell: msys2 {0}
     defaults:
       run:
@@ -115,12 +78,28 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          submodules: true
 
       - name: Download required linux packages
         if: runner.os == 'Linux'
         run: |
           sudo apt update
           sudo apt install expect valgrind g++-multilib qemu-user-static
+
+      - name: Install GCC ${{ matrix.config.gcc }}
+        if: runner.os == 'Linux' && matrix.config.gcc
+        uses: rhalbersma/cpp-ci/.github/actions/install-gcc@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+        with:
+          version: ${{ matrix.config.gcc }}
+          trunk: "false"
+          multilib: "true"
+
+      - name: Install Clang ${{ matrix.config.clang }}
+        if: runner.os == 'Linux' && matrix.config.clang
+        uses: rhalbersma/cpp-ci/.github/actions/install-clang@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+        with:
+          version: ${{ matrix.config.clang }}
+          llvm_suffix: ${{ matrix.config.llvm_suffix }}
 
       - name: Install NDK
         if: runner.os == 'Linux'
@@ -158,18 +137,39 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install coreutils
 
+      - name: Select Xcode
+        if: runner.os == 'macOS' && matrix.config.developer_dir
+        run: echo "DEVELOPER_DIR=${{ matrix.config.developer_dir }}" >> $GITHUB_ENV
+
       - name: Install GCC on macOS
         if: runner.os == 'macOS' && matrix.config.comp == 'gcc'
         run: |
-          brew install gcc@11 || true
-          g++-11 --version
+          brew install gcc@15 || true
+          g++-15 --version
+
+      # WinLibs pins the GCC major version, which msys2's rolling mingw-w64-gcc does not
+      - name: Install WinLibs GCC ${{ matrix.config.winlibs }}
+        if: runner.os == 'Windows'
+        uses: rhalbersma/cpp-ci/.github/actions/install-winlibs@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+        with:
+          tag_prefix: ${{ matrix.config.winlibs }}
+          snapshot: "false"
+          token: ${{ github.token }}
 
       - name: Setup msys and install required packages
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@e9898307ac31d1a803454791be09ab9973336e1c # v2.31.1
         with:
           msystem: ${{ matrix.config.msys_sys }}
-          install: mingw-w64-${{ matrix.config.msys_env }} make git expect
+          path-type: inherit
+          install: make git expect xz
+
+      - name: Install Boost headers
+        run: |
+          dest="$RUNNER_TEMP/boost"
+          if command -v cygpath > /dev/null; then dest="$(cygpath -m "$RUNNER_TEMP")/boost"; fi
+          ../.github/ci/install_boost_headers.sh "$dest"
+          echo "BOOST_INCLUDE=$dest" >> $GITHUB_ENV
 
       - name: Download the used network from the fishtest framework
         run: make net

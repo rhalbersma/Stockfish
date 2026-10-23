@@ -6,40 +6,46 @@ on:
 jobs:
   avx2-compiler-matrix:
     name: avx2 (${{ matrix.name }})
-    runs-on: ubuntu-latest
-    container:
-      image: ${{ matrix.image }}
+    runs-on: ubuntu-24.04
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: gcc-10, comp: gcc, cxx: g++, image: "ghcr.io/official-stockfish/compiler-images:gcc-10" }
-          - { name: gcc-11, comp: gcc, cxx: g++, image: "ghcr.io/official-stockfish/compiler-images:gcc-11" }
-          - { name: gcc-12, comp: gcc, cxx: g++, image: "ghcr.io/official-stockfish/compiler-images:gcc-12" }
-          - { name: gcc-13, comp: gcc, cxx: g++, image: "ghcr.io/official-stockfish/compiler-images:gcc-13" }
-          - { name: gcc-14, comp: gcc, cxx: g++, image: "ghcr.io/official-stockfish/compiler-images:gcc-14" }
-          - { name: gcc-15, comp: gcc, cxx: g++, image: "ghcr.io/official-stockfish/compiler-images:gcc-15" }
-          - { name: gcc-16, comp: gcc, cxx: g++, image: "ghcr.io/official-stockfish/compiler-images:gcc-16" }
+          # GCC 10 to 14 and Clang 11 to 21 are dropped: this branch needs C++23 and xstd-bits' toolchain rungs.
+          - { name: gcc-15, comp: gcc, cxx: g++-15, gcc: "15", gcc_trunk: "false" }
+          - { name: gcc-16, comp: gcc, cxx: g++-16, gcc: "16", gcc_trunk: "false" }
+          - { name: gcc-17-SVN, comp: gcc, cxx: g++-17, gcc: "17", gcc_trunk: "true" }
 
-          - { name: clang-11, comp: clang, cxx: clang++, image: "ghcr.io/official-stockfish/compiler-images:clang-11" }
-          - { name: clang-12, comp: clang, cxx: clang++, image: "ghcr.io/official-stockfish/compiler-images:clang-12" }
-          - { name: clang-13, comp: clang, cxx: clang++, image: "ghcr.io/official-stockfish/compiler-images:clang-13" }
-          - { name: clang-14, comp: clang, cxx: clang++, image: "ghcr.io/official-stockfish/compiler-images:clang-14" }
-          - { name: clang-15, comp: clang, cxx: clang++, image: "ghcr.io/official-stockfish/compiler-images:clang-15" }
-          - { name: clang-16, comp: clang, cxx: clang++, image: "ghcr.io/official-stockfish/compiler-images:clang-16" }
-          - { name: clang-17, comp: clang, cxx: clang++, image: "ghcr.io/official-stockfish/compiler-images:clang-17" }
-
-          - { name: clang-18, comp: clang, cxx: clang++-18, image: "ghcr.io/official-stockfish/compiler-images:clang-18" }
-          - { name: clang-19, comp: clang, cxx: clang++-19, image: "ghcr.io/official-stockfish/compiler-images:clang-19" }
-          - { name: clang-20, comp: clang, cxx: clang++-20, image: "ghcr.io/official-stockfish/compiler-images:clang-20" }
-          - { name: clang-21, comp: clang, cxx: clang++-21, image: "ghcr.io/official-stockfish/compiler-images:clang-21" }
-          - { name: clang-22, comp: clang, cxx: clang++-22, image: "ghcr.io/official-stockfish/compiler-images:clang-22" }
-          - { name: clang-23, comp: clang, cxx: clang++-23, image: "ghcr.io/official-stockfish/compiler-images:clang-23" }
+          - { name: clang-22, comp: clang, cxx: clang++-22, clang: "22", llvm_suffix: "-22", gcc: "15", gcc_trunk: "false" }
+          - { name: clang-23, comp: clang, cxx: clang++-23, clang: "23", llvm_suffix: "-23", gcc: "16", gcc_trunk: "false" }
+          - { name: clang-24-SVN, comp: clang, cxx: clang++-24, clang: "24", llvm_suffix: "", gcc: "17", gcc_trunk: "true", cxxflags: "--gcc-toolchain=/opt/gcc-latest" }
 
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+
+      # The libstdc++ of each rung, and its GCC on the GCC legs
+      - name: Install GCC ${{ matrix.gcc }}
+        uses: rhalbersma/cpp-ci/.github/actions/install-gcc@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+        with:
+          version: ${{ matrix.gcc }}
+          trunk: ${{ matrix.gcc_trunk }}
+          symlink_binaries: ${{ matrix.comp == 'gcc' }}
+
+      - name: Install Clang ${{ matrix.clang }}
+        if: matrix.comp == 'clang'
+        uses: rhalbersma/cpp-ci/.github/actions/install-clang@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+        with:
+          version: ${{ matrix.clang }}
+          llvm_suffix: ${{ matrix.llvm_suffix }}
+
+      - name: Install Boost headers
+        run: |
+          .github/ci/install_boost_headers.sh "$RUNNER_TEMP/boost"
+          echo "BOOST_INCLUDE=$RUNNER_TEMP/boost" >> $GITHUB_ENV
 
       - name: Download network
         working-directory: src
@@ -48,7 +54,7 @@ jobs:
       - name: Build avx2 binary
         working-directory: src
         run: |
-          export CXXFLAGS="-Werror"
+          export CXXFLAGS="-Werror ${{ matrix.cxxflags }}"
           make clean
           make -j build ARCH=x86-64-avx2 COMP=${{ matrix.comp }} COMPCXX=${{ matrix.cxx }}
 

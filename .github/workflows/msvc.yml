@@ -5,16 +5,19 @@ on:
 
 jobs:
   msvc:
-    name: ${{ matrix.name }} (msvc)
-    runs-on: windows-latest
+    name: ${{ matrix.name }} (msvc ${{ matrix.msvc }})
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Runners cannot execute AVX-512, so avx512icl is build-only.
-          - { name: avx2, flags: "/arch:AVX2", bench: true }
-          - { name: avx512icl, flags: "/arch:AVX512 /DUSE_AVX512 /DUSE_VNNI /DUSE_AVX512ICL /DUSE_PEXT", bench: false }
+          # xstd-bits' MSVC rungs: 2022, 2026 and the 2026 Preview toolset.
+          # Runners cannot execute AVX-512, so avx512icl is build-only, on the stable rung.
+          - { name: avx2, msvc: "2022", os: windows-2022, flags: "/arch:AVX2", bench: true }
+          - { name: avx2, msvc: "2026", os: windows-2025, flags: "/arch:AVX2", bench: true }
+          - { name: avx2, msvc: "2026-Preview", os: windows-2025, preview: true, flags: "/arch:AVX2", bench: true }
+          - { name: avx512icl, msvc: "2022", os: windows-2022, flags: "/arch:AVX512 /DUSE_AVX512 /DUSE_VNNI /DUSE_AVX512ICL /DUSE_PEXT", bench: false }
 
     defaults:
       run:
@@ -27,6 +30,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          submodules: true
+
+      - name: Install Boost headers
+        run: |
+          dest="$(cygpath -m "$RUNNER_TEMP")/boost"
+          ../.github/ci/install_boost_headers.sh "$dest"
+          echo "BOOST_INCLUDE=$dest" >> $GITHUB_ENV
 
       - name: Download network
         if: matrix.bench
@@ -40,13 +50,22 @@ jobs:
           done
           [[ -n "$benchref" ]] && echo "benchref=$benchref" >> $GITHUB_ENV && echo "From commit: $hash" && echo "Reference bench: $benchref" || echo "No bench found"
 
+      - name: Install the MSVC Preview toolset
+        if: matrix.preview
+        id: preview
+        uses: rhalbersma/cpp-ci/.github/actions/install-msvc-preview@acbf0f0b3ed85dcabf95cd0d4806c0fa7c451ecf
+
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          toolset: ${{ steps.preview.outputs.toolset }}
 
       - name: Build ${{ matrix.name }} binary
         shell: cmd
         run: >-
-          cl /nologo /std:c++17 /MT /EHsc /O2 /MP /W3 /WX /permissive-
+          cl /nologo /std:c++latest /MT /EHsc /O2 /MP /W3 /WX /permissive-
+          /I..\external\xstd-bits\include /I..\external\xstd-ints\include /I..\external\xstd-misc\include
+          /I"%BOOST_INCLUDE%"
           /DUSE_POPCNT /DUSE_SSE2 /DUSE_SSSE3 /DUSE_SSE41 /DUSE_AVX2 ${{ matrix.flags }}
           /Fe:stockfish.exe *.cpp nnue\*.cpp nnue\features\*.cpp syzygy\*.cpp
           /link /STACK:8388608 shell32.lib
