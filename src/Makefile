@@ -689,6 +689,14 @@ else
 	endif
 endif
 
+### xstd-bits builds the message of the std::out_of_range it throws for a bad
+### Square with std::format, in every translation unit that inserts a Square.
+### That code uses up GCC's inline-unit-growth budget before small engine
+### functions such as shift() and xattacks_by() are inlined, so GCC gets a
+### larger budget until xstd-bits throws through an out-of-line helper
+### (rhalbersma/xstd-bits#500). Clang has no such limit.
+XSTD_GCC_INLINE_FLAGS = --param inline-unit-growth=200
+
 ### Sometimes gcc is really clang
 ifeq ($(COMP),gcc)
 	gccversion := $(shell $(CXX) --version 2>/dev/null)
@@ -700,9 +708,10 @@ ifeq ($(COMP),gcc)
 	else
 		gccmajorv := $(shell $(CXX) -dumpversion 2>/dev/null)
 		CXXFLAGS += -Wstack-usage=128000 -fno-ipa-cp-clone -fconstexpr-ops-limit=500000000
+		CXXFLAGS += $(XSTD_GCC_INLINE_FLAGS)
 	endif
 else ifeq ($(COMP),mingw)
-	CXXFLAGS += -fno-ipa-cp-clone
+	CXXFLAGS += -fno-ipa-cp-clone $(XSTD_GCC_INLINE_FLAGS)
 endif
 
 # On Android Bionic's C library comes with its own pthread implementation bundled in
