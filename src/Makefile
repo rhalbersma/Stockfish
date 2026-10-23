@@ -498,8 +498,22 @@ ifeq ($(MAKELEVEL),0)
        export ENV_LDFLAGS := $(LDFLAGS)
 endif
 
-CXXFLAGS = $(ENV_CXXFLAGS) -Wall -Wcast-qual -fno-exceptions -std=c++17 $(EXTRACXXFLAGS)
-DEPENDFLAGS = $(ENV_DEPENDFLAGS) -std=c++17
+### xstd-bits provides Bitboard; its headers use those of xstd-ints, xstd-misc and
+### Boost (Hash2, Container, ContainerHash, Describe, Mp11, Config, Assert, Move).
+### Each xstd path defaults to the git submodule under external/ and can be
+### overridden. Boost is taken from the compiler's search path unless
+### BOOST_INCLUDE is given. The defaults are absolute, since universal builds
+### run this Makefile through a symlink in a directory of their own.
+EXTERNAL_DIR := $(abspath $(dir $(realpath $(firstword $(MAKEFILE_LIST))))../external)
+XSTD_BITS_INCLUDE ?= $(EXTERNAL_DIR)/xstd-bits/include
+XSTD_INTS_INCLUDE ?= $(EXTERNAL_DIR)/xstd-ints/include
+XSTD_MISC_INCLUDE ?= $(EXTERNAL_DIR)/xstd-misc/include
+BOOST_INCLUDE ?=
+XSTD_INCLUDES = -I$(XSTD_BITS_INCLUDE) -I$(XSTD_INTS_INCLUDE) -I$(XSTD_MISC_INCLUDE) \
+                $(if $(BOOST_INCLUDE),-I$(BOOST_INCLUDE))
+
+CXXFLAGS = $(ENV_CXXFLAGS) -Wall -Wcast-qual -fno-exceptions -std=c++23 $(XSTD_INCLUDES) $(EXTRACXXFLAGS)
+DEPENDFLAGS = $(ENV_DEPENDFLAGS) -std=c++23 $(XSTD_INCLUDES)
 LDFLAGS = $(ENV_LDFLAGS) $(EXTRALDFLAGS)
 
 ifeq ($(COMP),)
@@ -1504,7 +1518,7 @@ $(NET_SENTINEL): | $(TEMP_DIR)
 	@touch $@
 
 $(NNUE_EMBED_OBJ): $(UNIVERSAL_SRC_DIR)/nnue_embed.cpp $(NET_SENTINEL) | $(TEMP_DIR)
-	$(CXX) -O2 -std=c++20 -Wno-c++26-extensions $(SLICE_DEF) $(mac_target_flags) $(EXTRACXXFLAGS) $(EMBED_DIR) -c $< -o $@
+	$(CXX) -O2 -std=c++23 $(XSTD_INCLUDES) -Wno-c++26-extensions $(SLICE_DEF) $(mac_target_flags) $(EXTRACXXFLAGS) $(EMBED_DIR) -c $< -o $@
 
 $(UNIVERSAL_ENTRY_OBJ): $(UNIVERSAL_ENTRY_SRC) | $(TEMP_DIR)
 	$(CXX) -O2 -std=c++20 $(mac_target_flags) $(EXTRACXXFLAGS) -c $< -o $@

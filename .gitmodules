@@ -1,0 +1,9 @@
+[submodule "external/xstd-bits"]
+	path = external/xstd-bits
+	url = https://github.com/rhalbersma/xstd-bits.git
+[submodule "external/xstd-ints"]
+	path = external/xstd-ints
+	url = https://github.com/rhalbersma/xstd-ints.git
+[submodule "external/xstd-misc"]
+	path = external/xstd-misc
+	url = https://github.com/rhalbersma/xstd-misc.git
