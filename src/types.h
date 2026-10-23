@@ -39,6 +39,8 @@
     #include <cassert>
     #include <cstddef>
     #include <cstdint>
+    #include <xstd/bits/bit_set/bit_enum_set.hpp>
+    #include <xstd/bits/bit_set/bit_key_mapping.hpp>
     #include "misc.h"
 
     #if defined(_MSC_VER)
@@ -109,8 +111,7 @@ constexpr bool Is64Bit = true;
 constexpr bool Is64Bit = false;
     #endif
 
-using Key      = u64;
-using Bitboard = u64;
+using Key = u64;
 
 constexpr int MAX_MOVES = 256;
 constexpr int MAX_PLY   = 246;
@@ -256,6 +257,18 @@ enum Square : u8 {
     SQUARE_NB   = 64
 };
 // clang-format on
+
+}  // namespace Stockfish
+
+// A Bitboard holds the squares SQ_A1 to SQ_H8, one bit each in square order.
+// SQ_NONE and SQUARE_NB are not squares, so the range is named here.
+template<>
+struct xstd::bit_key_mapping<Stockfish::Square>
+    : xstd::bit_range_mapping<Stockfish::Square, Stockfish::SQ_A1, Stockfish::SQUARE_NB> {};
+
+namespace Stockfish {
+
+using Bitboard = xstd::bit_enum_set<Square>;
 
 enum Direction : i8 {
     NORTH = 8,

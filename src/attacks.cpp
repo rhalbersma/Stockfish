@@ -39,14 +39,14 @@ alignas(64) Magic Magics[SQUARE_NB][2];
 }
 
 [[maybe_unused]] static constexpr Bitboard line_mask(Square sq, Direction d1, Direction d2) {
-    Bitboard mask = 0;
+    Bitboard mask;
     for (Direction d : {d1, d2})
     {
         Square s = sq;
-        while (Bitboard dest = safe_destination(s, d))
+        while (!safe_destination(s, d).empty())
         {
-            mask |= dest;
             s += d;
+            mask |= s;
         }
     }
     return mask;
@@ -75,7 +75,8 @@ alignas(64) constexpr auto RankAttacks = []() {
     std::array<std::array<u8, 64>, FILE_NB> table{};
     for (int file = 0; file < 8; ++file)
         for (int occ6 = 0; occ6 < 64; ++occ6)
-            table[file][occ6] = u8(sliding_attack(ROOK, Square(file), occ6 << 1));
+            table[file][occ6] = u8(xstd::bit_convert<u64>(
+              sliding_attack(ROOK, Square(file), Bitboard(xstd::from_blocks, u64(occ6) << 1))));
     return table;
 }();
 
@@ -86,10 +87,10 @@ static constexpr auto make_dual_magics() {
         DualMagic& m        = magics[s];
         m.maskFile          = line_mask(s, NORTH, SOUTH);
         m.maskDiag          = line_mask(s, NORTH_EAST, SOUTH_WEST);
-        m.maskNone          = 0;
+        m.maskNone          = Bitboard{};
         m.maskAntidiag      = line_mask(s, NORTH_WEST, SOUTH_EAST);
-        m.r                 = square_bb(s) * 2;
-        m.rr                = square_bb(Square(63 - int(s))) * 2;
+        m.r                 = xstd::bit_convert<u64>(Bitboard{s} << 1);
+        m.rr                = xstd::bit_convert<u64>(Bitboard{Square(63 - int(s))} << 1);
         m.rankAttacksLookup = RankAttacks[int(file_of(s))].data();
         m.shift             = 8 * int(rank_of(s));
     }
@@ -113,31 +114,34 @@ void init_magics(PieceType pt, Bitboard table[], Magic magics[][2]) {
 
     for (Square s = SQ_A1; s <= SQ_H8; ++s)
     {
-        Bitboard edges = ((Rank1BB | Rank8BB) & ~rank_bb(s)) | ((FileABB | FileHBB) & ~file_bb(s));
+        Bitboard edges = ((Rank1BB | Rank8BB) - rank_bb(s)) | ((FileABB | FileHBB) - file_bb(s));
 
         Magic&   m       = magics[s][pt - BISHOP];
-        Bitboard attacks = sliding_attack(pt, s, 0);
-        m.mask           = attacks & ~edges;
-        m.shift          = (Is64Bit ? 64 : 32) - popcount(m.mask);
+        Bitboard attacks = sliding_attack(pt, s, Bitboard{});
+        m.mask           = attacks - edges;
+        m.shift          = (Is64Bit ? 64 : 32) - int(m.mask.size());
         m.attacks        = s == SQ_A1 ? table : magics[s - 1][pt - BISHOP].attacks + size;
         size             = 0;
 
-        Bitboard b = 0;
+        // Carry-Rippler: enumerate every subset of the mask, which needs the
+        // integer subtraction to carry across squares.
+        u64 mask = xstd::bit_convert<u64>(m.mask);
+        u64 b    = 0;
         do
         {
-            occupancy[size] = b;
-            reference[size] = sliding_attack(pt, s, b);
+            occupancy[size] = Bitboard(xstd::from_blocks, b);
+            reference[size] = sliding_attack(pt, s, occupancy[size]);
 
             size++;
-            b = (b - m.mask) & m.mask;
+            b = (b - mask) & mask;
         } while (b);
 
         PRNG rng(seeds[Is64Bit][rank_of(s)]);
 
         for (int i = 0; i < size;)
         {
-            for (m.magic = 0; popcount((m.magic * m.mask) >> 56) < 6;)
-                m.magic = rng.sparse_rand<Bitboard>();
+            for (m.magic = 0; popcount((m.magic * mask) >> 56) < 6;)
+                m.magic = rng.sparse_rand<u64>();
 
             for (++cnt, i = 0; i < size; ++i)
             {
@@ -177,13 +181,14 @@ void init() {
         for (PieceType pt : {BISHOP, ROOK})
             for (Square s2 = SQ_A1; s2 <= SQ_H8; ++s2)
             {
-                if (PseudoAttacks[pt][s1] & s2)
+                if (PseudoAttacks[pt][s1].contains(s2))
                 {
-                    LineBB[s1][s2] = (attacks_bb(pt, s1, 0) & attacks_bb(pt, s2, 0)) | s1 | s2;
+                    LineBB[s1][s2] =
+                      (attacks_bb(pt, s1, Bitboard{}) & attacks_bb(pt, s2, Bitboard{})) | s1 | s2;
                     BetweenBB[s1][s2] =
-                      (attacks_bb(pt, s1, square_bb(s2)) & attacks_bb(pt, s2, square_bb(s1)));
+                      (attacks_bb(pt, s1, Bitboard{s2}) & attacks_bb(pt, s2, Bitboard{s1}));
                     inverse_RayPassBB[s2][s1] =
-                      attacks_bb(pt, s1, 0) & (attacks_bb(pt, s2, square_bb(s1)) | s2);
+                      attacks_bb(pt, s1, Bitboard{}) & (attacks_bb(pt, s2, Bitboard{s1}) | s2);
                 }
                 BetweenBB[s1][s2] |= s2;
             }

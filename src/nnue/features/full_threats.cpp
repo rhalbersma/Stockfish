@@ -23,6 +23,7 @@
 #include <array>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 
 #include "../../attacks.h"
 #include "../../bitboard.h"
@@ -52,16 +53,17 @@ constexpr auto index_lut2_array() {
         {
             for (Square to = SQ_A1; to <= SQ_H8; ++to)
             {
-                Bitboard attacks      = (pt != PAWN) ? Attacks::PseudoAttacks[pt][from]
-                                      : (to < from)  ? Attacks::PseudoAttacks[BLACK][from]
-                                                     : Attacks::PseudoAttacks[WHITE][from];
-                indices[pt][from][to] = offset + constexpr_popcount(((1ULL << to) - 1) & attacks);
+                Bitboard attacks = (pt != PAWN) ? Attacks::PseudoAttacks[pt][from]
+                                 : (to < from)  ? Attacks::PseudoAttacks[BLACK][from]
+                                                : Attacks::PseudoAttacks[WHITE][from];
+                indices[pt][from][to] =
+                  offset + int(std::distance(attacks.begin(), attacks.lower_bound(to)));
             }
 
             if (pt != PAWN)
-                offset += constexpr_popcount(Attacks::PseudoAttacks[pt][from]);
+                offset += int(Attacks::PseudoAttacks[pt][from].size());
             else if (from >= SQ_A2 && from <= SQ_H7)
-                offset += constexpr_popcount(Attacks::PseudoAttacks[WHITE][from]);
+                offset += int(Attacks::PseudoAttacks[WHITE][from].size());
         }
     }
 
@@ -82,14 +84,14 @@ constexpr auto init_threat_offsets() {
             if (type_of(piece) != PAWN)
             {
                 Bitboard attacks = Attacks::PseudoAttacks[type_of(piece)][from];
-                cumulativePieceOffset += constexpr_popcount(attacks);
+                cumulativePieceOffset += int(attacks.size());
             }
 
             else if (from >= SQ_A2 && from <= SQ_H7)
             {
                 Bitboard attacks = (pieceIdx < 8) ? Attacks::PseudoAttacks[WHITE][from]
                                                   : Attacks::PseudoAttacks[BLACK][from];
-                cumulativePieceOffset += constexpr_popcount(attacks);
+                cumulativePieceOffset += int(attacks.size());
             }
         }
 
@@ -167,10 +169,9 @@ void FullThreats::append_active_indices(Color perspective, const Position& pos, 
 
     auto process_pawn_attacks = [&](Color c, Direction attkDir) {
         const Bitboard cPawns  = pos.pieces(c, PAWN);
-        Bitboard       attacks = shift(cPawns, attkDir) & pawnTargets;
-        while (attacks)
+        const Bitboard attacks = shift(cPawns, attkDir) & pawnTargets;
+        for (Square to : attacks)
         {
-            Square    to       = pop_lsb(attacks);
             Square    from     = to - attkDir;
             Piece     attacked = pos.piece_on(to);
             Piece     attacker = make_piece(c, PAWN);
@@ -190,15 +191,12 @@ void FullThreats::append_active_indices(Color perspective, const Position& pos, 
         for (PieceType pt = KNIGHT; pt < KING; ++pt)
         {
             Piece    attacker = make_piece(c, pt);
-            Bitboard bb       = pos.pieces(c, pt);
             Bitboard targets  = pt == KNIGHT || pt == QUEEN ? queenTargets : minorSliderTargets;
-            while (bb)
+            for (Square from : pos.pieces(c, pt))
             {
-                Square   from    = pop_lsb(bb);
                 Bitboard attacks = Attacks::attacks_bb(pt, from, occupied) & targets;
-                while (attacks)
+                for (Square to : attacks)
                 {
-                    Square    to       = pop_lsb(attacks);
                     Piece     attacked = pos.piece_on(to);
                     IndexType index    = make_index(perspective, attacker, from, to, attacked, ksq);
                     active.push_back_if_lt(index, Dimensions);

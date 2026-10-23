@@ -29,7 +29,7 @@ std::string Bitboards::pretty(Bitboard b) {
     for (Rank r = RANK_8;; --r)
     {
         for (File f = FILE_A; f <= FILE_H; ++f)
-            s += b & make_square(f, r) ? "| X " : "|   ";
+            s += b.contains(make_square(f, r)) ? "| X " : "|   ";
 
         s += "| " + std::to_string(1 + r) + "\n+---+---+---+---+---+---+---+---+\n";
 

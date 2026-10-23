@@ -51,7 +51,7 @@ Value Eval::evaluate(const Eval::NNUE::Network&     network,
                      Eval::NNUE::AccumulatorCaches& caches,
                      int                            optimism) {
 
-    assert(!pos.checkers());
+    assert(pos.checkers().empty());
     Value nnue = network.evaluate(pos, accumulators, caches);
     return scale_evaluation(nnue, optimism, pos);
 }
@@ -90,7 +90,7 @@ Value scale_evaluation(Value nnue, int optimism, const Position& pos) {
 // Trace scores are from white's point of view
 std::string Eval::trace(Position& pos, const Eval::NNUE::Network& network) {
 
-    if (pos.checkers())
+    if (!pos.checkers().empty())
         return "Final evaluation: none (in check)";
 
     auto accumulators = std::make_unique<Eval::NNUE::AccumulatorStack>();

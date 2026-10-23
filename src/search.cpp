@@ -219,7 +219,7 @@ void Search::Worker::start_searching() {
     if (rootMoves.empty())
     {
         main_manager()->updates.onUpdateNoMoves(
-          {0, {rootPos.checkers() ? -VALUE_MATE : VALUE_DRAW, rootPos}});
+          {0, {!rootPos.checkers().empty() ? -VALUE_MATE : VALUE_DRAW, rootPos}});
         main_manager()->updates.onBestmove(UCIEngine::move(Move::none()), "");
         return;
     }
@@ -779,7 +779,7 @@ Value Search::Worker::search(
     SearchedList quietsSearched;
 
     // Step 1. Initialize node
-    ss->inCheck   = pos.checkers();
+    ss->inCheck   = !pos.checkers().empty();
     priorCapture  = pos.captured_piece();
     Color us      = pos.side_to_move();
     ss->moveCount = 0;
@@ -1716,7 +1716,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
     }
 
     bestMove    = Move::none();
-    ss->inCheck = pos.checkers();
+    ss->inCheck = !pos.checkers().empty();
     moveCount   = 0;
 
     // Used to send selDepth info to GUI (selDepth counts from 1, ply from 0)
@@ -1892,7 +1892,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
 
         // Only check for stalemate under specific conditions
         Color us = pos.side_to_move();
-        if (!(pawn_single_push_bb(us, pos.pieces(us, PAWN)) & ~pos.pieces())
+        if ((pawn_single_push_bb(us, pos.pieces(us, PAWN)) - pos.pieces()).empty()
             && !pos.non_pawn_material(us) && type_of(pos.captured_piece()) >= KNIGHT
             && !MoveList<ALL>(pos).size())
             bestValue = VALUE_DRAW;

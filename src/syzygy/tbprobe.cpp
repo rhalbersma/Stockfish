@@ -443,12 +443,12 @@ TBTable<WDL>::TBTable(const std::string& code) :
     (void) err;
     key        = pos.material_key();
     pieceCount = pos.count<ALL_PIECES>();
-    hasPawns   = pos.pieces(PAWN);
+    hasPawns   = !pos.pieces(PAWN).empty();
 
     hasUniquePieces = false;
     for (Color c : {WHITE, BLACK})
         for (PieceType pt = PAWN; pt < KING; ++pt)
-            if (popcount(pos.pieces(c, pt)) == 1)
+            if (pos.pieces(c, pt).size() == 1)
                 hasUniquePieces = true;
 
     // Set the leading color. In case both sides have pawns the leading color
@@ -804,7 +804,7 @@ Ret do_probe_table(const Position& pos, T* entry, WDLScore wdl, ProbeState* resu
     u64        idx;
     int        next = 0, size = 0, leadPawnsCnt = 0;
     PairsData* d;
-    Bitboard   b, leadPawns = 0;
+    Bitboard   b, leadPawns;
     File       tbFile = FILE_A;
 
     // A given TB entry like KRK has associated two material keys: KRvk and Kvkr.
@@ -838,7 +838,7 @@ Ret do_probe_table(const Position& pos, T* entry, WDLScore wdl, ProbeState* resu
         leadPawns = b = pos.pieces(color_of(pc), PAWN);
         do
             squares[size++] = pop_lsb(b) ^ flipSquares;
-        while (b);
+        while (!b.empty());
 
         leadPawnsCnt = size;
 
@@ -861,7 +861,7 @@ Ret do_probe_table(const Position& pos, T* entry, WDLScore wdl, ProbeState* resu
         Square s       = pop_lsb(b);
         squares[size]  = s ^ flipSquares;
         pieces[size++] = Piece(pos.piece_on(s) ^ flipColor);
-    } while (b);
+    } while (!b.empty());
 
     assert(size >= 2);
 
@@ -1405,8 +1405,8 @@ void* mapped(TBTable<Type>& e, const Position& pos) {
     std::string fname, w, b;
     for (PieceType pt = KING; pt >= PAWN; --pt)
     {
-        w += std::string(popcount(pos.pieces(WHITE, pt)), PieceToChar[pt]);
-        b += std::string(popcount(pos.pieces(BLACK, pt)), PieceToChar[pt]);
+        w += std::string(pos.pieces(WHITE, pt).size(), PieceToChar[pt]);
+        b += std::string(pos.pieces(BLACK, pt).size(), PieceToChar[pt]);
     }
 
     fname =
@@ -1572,7 +1572,7 @@ void Tablebases::init(const std::string& paths) {
             if (MapA1D1D4[s1] == idx && (idx || s1 == SQ_B1))  // SQ_B1 is mapped to 0
             {
                 for (Square s2 = SQ_A1; s2 <= SQ_H8; ++s2)
-                    if ((Attacks::PseudoAttacks[KING][s1] | s1) & s2)
+                    if ((Attacks::PseudoAttacks[KING][s1] | s1).contains(s2))
                         continue;  // Illegal position
 
                     else if (!off_A1H8(s1) && off_A1H8(s2) > 0)
@@ -1761,7 +1761,7 @@ int Tablebases::probe_dtz(Position& pos, ProbeState* result) {
         dtz = zeroing ? -dtz_before_zeroing(search<false>(pos, result)) : -probe_dtz(pos, result);
 
         // If the move mates, force minDTZ to 1
-        if (dtz == 1 && pos.checkers() && MoveList<ALL>(pos).size() == 0)
+        if (dtz == 1 && !pos.checkers().empty() && MoveList<ALL>(pos).size() == 0)
             minDTZ = 1;
 
         // Convert result from 1-ply search. Zeroing moves are already accounted
@@ -1831,7 +1831,7 @@ bool Tablebases::root_probe(Position&                    pos,
         }
 
         // Make sure that a mating move is assigned a dtz value of 1
-        if (pos.checkers() && dtz == 2 && MoveList<ALL>(pos).size() == 0)
+        if (!pos.checkers().empty() && dtz == 2 && MoveList<ALL>(pos).size() == 0)
             dtz = 1;
 
         pos.undo_move(m.pv[0]);

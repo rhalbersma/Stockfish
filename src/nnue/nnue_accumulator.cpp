@@ -170,7 +170,7 @@ void AccumulatorStack::forward_update_incremental(Color                     pers
     assert(accumulators[begin].computed[perspective]);
 
     const Square ksq              = pos.square<KING>(perspective);
-    const bool   opponentHasQueen = bool(pos.pieces(~perspective, QUEEN));
+    const bool   opponentHasQueen = !pos.pieces(~perspective, QUEEN).empty();
 
     for (usize next = begin + 1; next < size; next++)
         update_accumulator_incremental<true>(perspective, featureTransformer, ksq, opponentHasQueen,
@@ -189,7 +189,7 @@ void AccumulatorStack::backward_update_incremental(Color                     per
     assert(latest().computed[perspective]);
 
     const Square ksq              = pos.square<KING>(perspective);
-    const bool   opponentHasQueen = bool(pos.pieces(~perspective, QUEEN));
+    const bool   opponentHasQueen = !pos.pieces(~perspective, QUEEN).empty();
 
     for (i64 next = i64(size) - 2; next >= i64(end); next--)
         update_accumulator_incremental<false>(perspective, featureTransformer, ksq,
@@ -211,8 +211,8 @@ void AccumulatorStack::forward_update_incremental_both(const Position&          
 
     const Square white_ksq     = pos.square<KING>(WHITE);
     const Square black_ksq     = pos.square<KING>(BLACK);
-    const bool   whiteOppQueen = bool(pos.pieces(BLACK, QUEEN));
-    const bool   blackOppQueen = bool(pos.pieces(WHITE, QUEEN));
+    const bool   whiteOppQueen = !pos.pieces(BLACK, QUEEN).empty();
+    const bool   blackOppQueen = !pos.pieces(WHITE, QUEEN).empty();
     const usize  shared_begin  = std::max(white_begin, black_begin);
 
     // Catch up the lagging perspective, then traverse the common suffix once.
@@ -596,7 +596,7 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
                             const std::array<Piece, SQUARE_NB>& newPieces) {
 #if defined(USE_AVX2)
     static_assert(sizeof(Piece) == 1);
-    Bitboard sameBB = 0;
+    u64 sameMask = 0;
 
     for (int i = 0; i < 64; i += 32)
     {
@@ -604,13 +604,13 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
         const __m256i new_v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&newPieces[i]));
         const __m256i cmpEqual  = _mm256_cmpeq_epi8(old_v, new_v);
         const u32     equalMask = _mm256_movemask_epi8(cmpEqual);
-        sameBB |= static_cast<Bitboard>(equalMask) << i;
+        sameMask |= static_cast<u64>(equalMask) << i;
     }
-    return ~sameBB;
+    return ~Bitboard(xstd::from_blocks, sameMask);
 #elif defined(USE_LASX)
     static_assert(sizeof(Piece) == 1);
 
-    Bitboard changed = 0;
+    u64 changed = 0;
 
     for (int i = 0; i < 64; i += 32)
     {
@@ -621,14 +621,14 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
         const auto    lo    = __lasx_xvpickve2gr_d(mask, 0);
         const auto    hi    = __lasx_xvpickve2gr_d(mask, 2);
 
-        changed |= (static_cast<Bitboard>(lo) | (static_cast<Bitboard>(hi) << 16)) << i;
+        changed |= (static_cast<u64>(lo) | (static_cast<u64>(hi) << 16)) << i;
     }
 
-    return changed;
+    return Bitboard(xstd::from_blocks, changed);
 #elif defined(USE_LSX)
     static_assert(sizeof(Piece) == 1);
 
-    Bitboard changed = 0;
+    u64 changed = 0;
 
     for (int i = 0; i < 64; i += 16)
     {
@@ -637,10 +637,10 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
         const __m128i diff  = __lsx_vxor_v(old_v, new_v);
         const __m128i mask  = __lsx_vmsknz_b(diff);
 
-        changed |= static_cast<Bitboard>(__lsx_vpickve2gr_d(mask, 0)) << i;
+        changed |= static_cast<u64>(__lsx_vpickve2gr_d(mask, 0)) << i;
     }
 
-    return changed;
+    return Bitboard(xstd::from_blocks, changed);
 #elif defined(USE_NEON)
     uint8x16x4_t old_v = vld4q_u8(reinterpret_cast<const u8*>(oldPieces.data()));
     uint8x16x4_t new_v = vld4q_u8(reinterpret_cast<const u8*>(newPieces.data()));
@@ -652,9 +652,9 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
     merged            = vsriq_n_u8(merged, merged, 4);
     uint8x8_t sameBB  = vshrn_n_u16(vreinterpretq_u16_u8(merged), 4);
 
-    return ~vget_lane_u64(vreinterpret_u64_u8(sameBB), 0);
+    return ~Bitboard(xstd::from_blocks, u64(vget_lane_u64(vreinterpret_u64_u8(sameBB), 0)));
 #elif defined(USE_SSE2)
-    Bitboard sameBB = 0;
+    u64 sameMask = 0;
 
     for (int i = 0; i < 64; i += 16)
     {
@@ -662,17 +662,19 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
         const __m128i new_v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&newPieces[i]));
         const __m128i same  = _mm_cmpeq_epi8(old_v, new_v);
 
-        sameBB |= static_cast<Bitboard>(_mm_movemask_epi8(same)) << i;
+        sameMask |= static_cast<u64>(_mm_movemask_epi8(same)) << i;
     }
 
-    return ~sameBB;
+    return ~Bitboard(xstd::from_blocks, sameMask);
 #elif defined(USE_RVV)
 
     #define IMPL(mx, bx) \
-        return __riscv_vmv_x_s_u64m1_u64(__riscv_vreinterpret_v_u8m1_u64m1( \
-          __riscv_vreinterpret_v_b##bx##_u8m1(__riscv_vmsne_vv_i8m##mx##_b##bx( \
-            __riscv_vle8_v_i8m##mx(reinterpret_cast<const i8*>(oldPieces.data()), 64), \
-            __riscv_vle8_v_i8m##mx(reinterpret_cast<const i8*>(newPieces.data()), 64), 64))))
+        return Bitboard( \
+          xstd::from_blocks, \
+          u64(__riscv_vmv_x_s_u64m1_u64(__riscv_vreinterpret_v_u8m1_u64m1( \
+            __riscv_vreinterpret_v_b##bx##_u8m1(__riscv_vmsne_vv_i8m##mx##_b##bx( \
+              __riscv_vle8_v_i8m##mx(reinterpret_cast<const i8*>(oldPieces.data()), 64), \
+              __riscv_vle8_v_i8m##mx(reinterpret_cast<const i8*>(newPieces.data()), 64), 64))))))
 
 
     usize vl = __riscv_vsetvlmax_e8m1();
@@ -686,10 +688,11 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
     #undef IMPL
 
 #else
-    Bitboard changed = 0;
+    Bitboard changed;
 
     for (Square sq = SQUARE_ZERO; sq < SQUARE_NB; ++sq)
-        changed |= static_cast<Bitboard>(oldPieces[sq] != newPieces[sq]) << sq;
+        if (oldPieces[sq] != newPieces[sq])
+            changed |= sq;
 
     return changed;
 #endif
@@ -730,14 +733,14 @@ void update_accumulator_hybrid(Color                     perspective,
     else
     {
         previousPieces[newKsq] = NO_PIECE;
-        previousPieceBB &= ~square_bb(newKsq);
+        previousPieceBB -= newKsq;
     }
 
     assert(previousPieces[oldKsq] == NO_PIECE);
     previousPieces[oldKsq] = make_piece(perspective, KING);
-    previousPieceBB |= square_bb(oldKsq);
+    previousPieceBB |= oldKsq;
 
-    const bool  opponentHasQueen = bool(pos.pieces(~perspective, QUEEN));
+    const bool  opponentHasQueen = !pos.pieces(~perspective, QUEEN).empty();
     const auto& oldEntry         = cache[opponentHasQueen][oldKsq][perspective];
     auto&       newEntry         = cache[opponentHasQueen][newKsq][perspective];
 
@@ -759,27 +762,23 @@ void update_accumulator_hybrid(Color                     perspective,
     PSQFeatureSet::write_indices(newEntry.pieces, currentPieces, newRemovedBB, newAddedBB,
                                  perspective, newKsq, opponentHasQueen, newRemove, newAdd);
 #else
-    while (oldRemovedBB)
+    for (Square sq : oldRemovedBB)
     {
-        Square sq = pop_lsb(oldRemovedBB);
         oldRemove.push_back(PSQFeatureSet::make_index(perspective, sq, oldEntry.pieces[sq], oldKsq,
                                                       opponentHasQueen));
     }
-    while (oldAddedBB)
+    for (Square sq : oldAddedBB)
     {
-        Square sq = pop_lsb(oldAddedBB);
         oldAdd.push_back(
           PSQFeatureSet::make_index(perspective, sq, previousPieces[sq], oldKsq, opponentHasQueen));
     }
-    while (newRemovedBB)
+    for (Square sq : newRemovedBB)
     {
-        Square sq = pop_lsb(newRemovedBB);
         newRemove.push_back(PSQFeatureSet::make_index(perspective, sq, newEntry.pieces[sq], newKsq,
                                                       opponentHasQueen));
     }
-    while (newAddedBB)
+    for (Square sq : newAddedBB)
     {
-        Square sq = pop_lsb(newAddedBB);
         newAdd.push_back(
           PSQFeatureSet::make_index(perspective, sq, currentPieces[sq], newKsq, opponentHasQueen));
     }
@@ -846,7 +845,7 @@ void update_accumulator_refresh_cache(Color                     perspective,
                                       AccumulatorState&         accumulator,
                                       AccumulatorCaches&        cache) {
 
-    const bool               opponentHasQueen = bool(pos.pieces(~perspective, QUEEN));
+    const bool               opponentHasQueen = !pos.pieces(~perspective, QUEEN).empty();
     const Square             ksq              = pos.square<KING>(perspective);
     auto&                    entry            = cache[opponentHasQueen][ksq][perspective];
     PSQFeatureSet::IndexList removed, added;
@@ -859,15 +858,13 @@ void update_accumulator_refresh_cache(Color                     perspective,
     PSQFeatureSet::write_indices(entry.pieces, pos.piece_array(), removedBB, addedBB, perspective,
                                  ksq, opponentHasQueen, removed, added);
 #else
-    while (removedBB)
+    for (Square sq : removedBB)
     {
-        Square sq = pop_lsb(removedBB);
         removed.push_back(
           PSQFeatureSet::make_index(perspective, sq, entry.pieces[sq], ksq, opponentHasQueen));
     }
-    while (addedBB)
+    for (Square sq : addedBB)
     {
-        Square sq = pop_lsb(addedBB);
         added.push_back(
           PSQFeatureSet::make_index(perspective, sq, pos.piece_on(sq), ksq, opponentHasQueen));
     }

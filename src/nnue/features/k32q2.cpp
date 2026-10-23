@@ -44,8 +44,8 @@ void K32Q2::write_indices(const std::array<Piece, SQUARE_NB>& oldPieces,
                           IndexList&                          removed,
                           IndexList&                          added) {
 
-    auto* write_removed = removed.make_space(popcount(removedBB));
-    auto* write_added   = added.make_space(popcount(addedBB));
+    auto* write_removed = removed.make_space(removedBB.size());
+    auto* write_added   = added.make_space(addedBB.size());
 
     const __m512i vecOldPieces = _mm512_loadu_si512(oldPieces.data());
     const __m512i vecNewPieces = _mm512_loadu_si512(newPieces.data());
@@ -62,10 +62,13 @@ void K32Q2::write_indices(const std::array<Piece, SQUARE_NB>& oldPieces,
     const __m512i psi_plus_offset = _mm512_add_epi16(
       psi, _mm512_set1_epi16(u16(KingBuckets[int(ksq) ^ flip] + queenOffset + orient)));
 
-    __m512i removed_squares = _mm512_maskz_compress_epi8(removedBB, AllSquares);
-    __m512i added_squares   = _mm512_maskz_compress_epi8(addedBB, AllSquares);
-    __m512i removed_pieces  = _mm512_maskz_compress_epi8(removedBB, vecOldPieces);
-    __m512i added_pieces    = _mm512_maskz_compress_epi8(addedBB, vecNewPieces);
+    const u64 removedMask = xstd::bit_convert<u64>(removedBB);
+    const u64 addedMask   = xstd::bit_convert<u64>(addedBB);
+
+    __m512i removed_squares = _mm512_maskz_compress_epi8(removedMask, AllSquares);
+    __m512i added_squares   = _mm512_maskz_compress_epi8(addedMask, AllSquares);
+    __m512i removed_pieces  = _mm512_maskz_compress_epi8(removedMask, vecOldPieces);
+    __m512i added_pieces    = _mm512_maskz_compress_epi8(addedMask, vecNewPieces);
 
     removed_squares = _mm512_cvtepi8_epi16(_mm512_castsi512_si256(removed_squares));
     added_squares   = _mm512_cvtepi8_epi16(_mm512_castsi512_si256(added_squares));

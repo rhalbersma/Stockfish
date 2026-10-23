@@ -44,7 +44,7 @@ void init();
 
 #ifdef USE_HYPERBOLA_QUINT
 
-inline Bitboard reverse_bb(Bitboard bb) {
+inline u64 reverse_bb(u64 bb) {
     #if __has_builtin(__builtin_bitreverse64)
     return __builtin_bitreverse64(bb);
     #else
@@ -52,14 +52,14 @@ inline Bitboard reverse_bb(Bitboard bb) {
             #if defined(__GNUC__) && !defined(__clang__) \
               && (__GNUC__ < 12 || (__GNUC__ == 12 && __GNUC_MINOR__ < 2))
     // no rbit in arm_acle.h
-    Bitboard out;
+    u64 out;
     asm("rbit %0, %1" : "=r"(out) : "r"(bb));
     return out;
             #else
     return __rbitll(bb);
             #endif
         #else  // loongarch
-    Bitboard out;
+    u64 out;
     asm("bitrev.d %0, %1" : "=r"(out) : "r"(bb));
     return out;
         #endif
@@ -73,11 +73,12 @@ struct Magic {
     // For rooks: file attacks, rank attacks. For bishops: diagonal/antidiagonal
     Bitboard mask1, mask2;
 
+    // The subtraction borrows across squares, so it runs on the integer.
     Bitboard hyperbola(Square s, Bitboard occupied, Bitboard mask) const {
-        Bitboard o   = occupied & mask;
-        Bitboard fwd = o - square_bb(s);
-        Bitboard rev = reverse_bb(o) - square_bb(Square(63 - int(s)));
-        return (fwd ^ reverse_bb(rev)) & mask;
+        u64 o   = xstd::bit_convert<u64>(occupied & mask);
+        u64 fwd = o - xstd::bit_convert<u64>(Bitboard{s});
+        u64 rev = reverse_bb(o) - xstd::bit_convert<u64>(Bitboard{Square(63 - int(s))});
+        return Bitboard(xstd::from_blocks, u64(fwd ^ reverse_bb(rev))) & mask;
     }
 
     Bitboard attacks_bb(Square s, Bitboard occupied) const {
@@ -92,8 +93,9 @@ const Magic& magic(Square s, PieceType pt);
 struct alignas(32) DualMagic {
     // file, diagonal, antidiagonal, unused
     Bitboard maskFile, maskDiag, maskAntidiag, maskNone;
-    // Precomputed 2 * square_bb(sq), 2 * reverse(square_bb(sq))
-    Bitboard r, rr;
+    // Precomputed 2 * square_bb(sq), 2 * reverse(square_bb(sq)), as the
+    // integers the subtractions below borrow from
+    u64 r, rr;
 
     const u8* RESTRICT rankAttacksLookup;
     // 8 * rank_of(sq)
@@ -121,21 +123,24 @@ struct alignas(32) DualMagic {
         const __m256i rs   = _mm256_set1_epi64x(r);
         const __m256i rrs  = _mm256_set1_epi64x(rr);
 
-        __m256i o      = _mm256_and_si256(mask, _mm256_set1_epi64x(occupied));
-        __m256i fwd    = _mm256_sub_epi64(o, rs);
-        __m256i rev    = bswap(_mm256_sub_epi64(bswap(o), rrs));
+        __m256i o   = _mm256_and_si256(mask, _mm256_set1_epi64x(xstd::bit_convert<u64>(occupied)));
+        __m256i fwd = _mm256_sub_epi64(o, rs);
+        __m256i rev = bswap(_mm256_sub_epi64(bswap(o), rrs));
         __m256i result = _mm256_and_si256(_mm256_xor_si256(fwd, rev), mask);
 
         // Lane 0: rook attacks (file only); lanes 1 and 2: bishop attacks
         const __m256i rookBishop =
           _mm256_or_si256(result, _mm256_permute4x64_epi64(result, _MM_SHUFFLE(3, 1, 2, 0)));
 
-        Bitboard rowOccupancy = rankAttacksLookup[(occupied >> (shift + 1)) & 0x3f];
-        Bitboard rankAttacks  = rowOccupancy << shift;
+        u64 rowOccupancy =
+          rankAttacksLookup[(xstd::bit_convert<u64>(occupied) >> (shift + 1)) & 0x3f];
+        Bitboard rankAttacks = Bitboard(xstd::from_blocks, rowOccupancy) << shift;
 
         // [bishop, rook]
-        return {_mm_extract_epi64(_mm256_castsi256_si128(rookBishop), 1),
-                _mm_cvtsi128_si64(_mm256_castsi256_si128(result)) + rankAttacks};
+        return {Bitboard(xstd::from_blocks,
+                         u64(_mm_extract_epi64(_mm256_castsi256_si128(rookBishop), 1))),
+                Bitboard(xstd::from_blocks, u64(_mm_cvtsi128_si64(_mm256_castsi256_si128(result))))
+                  | rankAttacks};
     }
 };
 
@@ -147,16 +152,18 @@ inline const DualMagic&                       dual_magic(Square s) { return Dual
 struct Magic {
     Bitboard  mask;
     Bitboard* attacks;
-    Bitboard  magic;
+    u64       magic;
     unsigned  shift;
 
     // Compute the attack's index using the 'magic bitboards' approach
     unsigned index(Bitboard occupied) const {
-        if (Is64Bit)
-            return unsigned(((occupied & mask) * magic) >> shift);
+        u64 relevant = xstd::bit_convert<u64>(occupied & mask);
 
-        unsigned lo = unsigned(occupied) & unsigned(mask);
-        unsigned hi = unsigned(occupied >> 32) & unsigned(mask >> 32);
+        if (Is64Bit)
+            return unsigned((relevant * magic) >> shift);
+
+        unsigned lo = unsigned(relevant);
+        unsigned hi = unsigned(relevant >> 32);
         return (lo * unsigned(magic) ^ hi * unsigned(magic >> 32)) >> shift;
     }
 
@@ -209,19 +216,19 @@ inline Bitboard antidiag_bb(Square s) {
 constexpr Bitboard safe_destination(Square s, int step) {
     constexpr auto abs = [](int v) { return v < 0 ? -v : v; };
     Square         to  = Square(s + step);
-    return is_ok(to) && abs(file_of(s) - file_of(to)) <= 2 ? square_bb(to) : Bitboard(0);
+    return is_ok(to) && abs(file_of(s) - file_of(to)) <= 2 ? Bitboard{to} : Bitboard{};
 }
 
 constexpr Bitboard sliding_attack(PieceType pt, Square sq, Bitboard occupied) {
-    Bitboard            attacks             = 0;
+    Bitboard            attacks;
     constexpr Direction RookDirections[4]   = {NORTH, SOUTH, EAST, WEST};
     constexpr Direction BishopDirections[4] = {NORTH_EAST, SOUTH_EAST, SOUTH_WEST, NORTH_WEST};
 
     for (Direction d : (pt == ROOK ? RookDirections : BishopDirections))
-        for (Square s = sq; Bitboard dest = safe_destination(s, d); s += d)
+        for (Square s = sq; !safe_destination(s, d).empty(); s += d)
         {
-            attacks |= dest;
-            if (occupied & dest)
+            attacks |= s + d;
+            if (occupied.contains(s + d))
                 break;
         }
 
@@ -229,14 +236,14 @@ constexpr Bitboard sliding_attack(PieceType pt, Square sq, Bitboard occupied) {
 }
 
 constexpr Bitboard knight_attack(Square sq) {
-    Bitboard b = {};
+    Bitboard b;
     for (int step : {-17, -15, -10, -6, 6, 10, 15, 17})
         b |= safe_destination(sq, step);
     return b;
 }
 
 constexpr Bitboard king_attack(Square sq) {
-    Bitboard b = {};
+    Bitboard b;
     for (int step : {-9, -8, -7, -1, 1, 7, 8, 9})
         b |= safe_destination(sq, step);
     return b;
@@ -247,16 +254,17 @@ constexpr Bitboard pseudo_attacks(PieceType pt, Square sq) {
     {
     case PieceType::ROOK :
     case PieceType::BISHOP :
-        return sliding_attack(pt, sq, 0);
+        return sliding_attack(pt, sq, Bitboard{});
     case PieceType::QUEEN :
-        return sliding_attack(PieceType::ROOK, sq, 0) | sliding_attack(PieceType::BISHOP, sq, 0);
+        return sliding_attack(PieceType::ROOK, sq, Bitboard{})
+             | sliding_attack(PieceType::BISHOP, sq, Bitboard{});
     case PieceType::KNIGHT :
         return knight_attack(sq);
     case PieceType::KING :
         return king_attack(sq);
     default :
         assert(false);
-        return 0;
+        return {};
     }
 }
 
@@ -265,8 +273,8 @@ inline constexpr auto PseudoAttacks = []() constexpr {
 
     for (Square s1 = SQ_A1; s1 <= SQ_H8; ++s1)
     {
-        attacks[WHITE][s1] = pawn_attacks_bb<WHITE>(square_bb(s1));
-        attacks[BLACK][s1] = pawn_attacks_bb<BLACK>(square_bb(s1));
+        attacks[WHITE][s1] = pawn_attacks_bb<WHITE>(Bitboard{s1});
+        attacks[BLACK][s1] = pawn_attacks_bb<BLACK>(Bitboard{s1});
 
         attacks[KING][s1]   = pseudo_attacks(KING, s1);
         attacks[KNIGHT][s1] = pseudo_attacks(KNIGHT, s1);

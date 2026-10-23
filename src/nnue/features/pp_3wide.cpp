@@ -72,23 +72,23 @@ void PP_3Wide::append_active_indices(Color perspective, const Position& pos, Ind
     const Bitboard black = pos.pieces(BLACK, PAWN);
 
     Bitboard bb = white;
-    while (bb)
+    while (!bb.empty())
     {
         Square         from = pop_lsb(bb);
         const Bitboard band = pawn_pair_bb(from);
-        for (Bitboard ww = band & bb; ww;)
-            active.push_back(make_index(perspective, WHITE, from, pop_lsb(ww), WHITE, ksq));
-        for (Bitboard wb = band & black; wb;)
-            active.push_back(make_index(perspective, WHITE, from, pop_lsb(wb), BLACK, ksq));
+        for (Square to : (band & bb))
+            active.push_back(make_index(perspective, WHITE, from, to, WHITE, ksq));
+        for (Square to : (band & black))
+            active.push_back(make_index(perspective, WHITE, from, to, BLACK, ksq));
     }
 
     bb = black;
-    while (bb)
+    while (!bb.empty())
     {
         Square         from = pop_lsb(bb);
         const Bitboard band = pawn_pair_bb(from);
-        for (Bitboard bbk = band & bb; bbk;)
-            active.push_back(make_index(perspective, BLACK, from, pop_lsb(bbk), BLACK, ksq));
+        for (Square to : (band & bb))
+            active.push_back(make_index(perspective, BLACK, from, to, BLACK, ksq));
     }
 }
 
@@ -118,23 +118,24 @@ void PP_3Wide::append_changed_indices(Color                                    p
                         IndexList& out) {
         const Bitboard friendly = perspective == WHITE ? pawnsW : pawnsB;
         const Bitboard enemy    = perspective == WHITE ? pawnsB : pawnsW;
-        const __m512i  ids      = _mm512_mask_blend_epi8(
-          friendly, _mm512_add_epi8(adjusted, _mm512_set1_epi8(48)), adjusted);
+        const __m512i  ids =
+          _mm512_mask_blend_epi8(xstd::bit_convert<u64>(friendly),
+                                 _mm512_add_epi8(adjusted, _mm512_set1_epi8(48)), adjusted);
 
-        const Bitboard unchanged = (pawnsW | pawnsB) & ~(updatedW | updatedB);
-        for (Bitboard u = updatedW | updatedB; u;)
+        const Bitboard unchanged = (pawnsW | pawnsB) - (updatedW | updatedB);
+        for (Bitboard u = updatedW | updatedB; !u.empty();)
         {
             const Square   a        = pop_lsb(u);
             const Bitboard partners = pawn_pair_bb(a) & (unchanged | u);
-            const int      n        = popcount(partners);
+            const int      n        = int(partners.size());
             if (!n)
                 continue;
 
-            const u16     colorOff = (enemy & a) ? 48 : 0;
+            const u16     colorOff = enemy.contains(a) ? 48 : 0;
             const u16     aId      = u16(((u8(a) ^ orientation) - 8) + colorOff);
-            const __m256i pids     = _mm256_cvtepu8_epi16(
-              _mm512_castsi512_si128(_mm512_maskz_compress_epi8(partners, ids)));
-            const __m256i feats = pp_idx_epi16(_mm256_set1_epi16(aId), pids);
+            const __m256i pids     = _mm256_cvtepu8_epi16(_mm512_castsi512_si128(
+              _mm512_maskz_compress_epi8(xstd::bit_convert<u64>(partners), ids)));
+            const __m256i feats    = pp_idx_epi16(_mm256_set1_epi16(aId), pids);
 
             u16* w = out.make_space(n);
             _mm256_storeu_epi16(w, feats);
@@ -149,23 +150,22 @@ void PP_3Wide::append_changed_indices(Color                                    p
                   reinterpret_cast<uintptr_t>(prefetchBase) + uintptr_t(index) * prefetchStride));
             out.push_back(index);
         };
-        const Bitboard unchanged = (pawnsW | pawnsB) & ~(updatedW | updatedB);
-        for (Bitboard u = updatedW | updatedB; u;)
+        const Bitboard unchanged = (pawnsW | pawnsB) - (updatedW | updatedB);
+        for (Bitboard u = updatedW | updatedB; !u.empty();)
         {
             const Square   a    = pop_lsb(u);
             const Bitboard mask = pawn_pair_bb(a) & (unchanged | u);
-            const Color    aCol = (pawnsB & a) ? BLACK : WHITE;
-            for (Bitboard pb = pawnsB & mask; pb;)
-                push(make_index(perspective, aCol, a, pop_lsb(pb), BLACK, ksq));
-            for (Bitboard pw = pawnsW & mask; pw;)
-                push(make_index(perspective, aCol, a, pop_lsb(pw), WHITE, ksq));
+            const Color    aCol = pawnsB.contains(a) ? BLACK : WHITE;
+            for (Square b : (pawnsB & mask))
+                push(make_index(perspective, aCol, a, b, BLACK, ksq));
+            for (Square w : (pawnsW & mask))
+                push(make_index(perspective, aCol, a, w, WHITE, ksq));
         }
     };
 #endif
 
-    generate(whiteAfter & ~whiteBefore, blackAfter & ~blackBefore, whiteAfter, blackAfter, added);
-    generate(whiteBefore & ~whiteAfter, blackBefore & ~blackAfter, whiteBefore, blackBefore,
-             removed);
+    generate(whiteAfter - whiteBefore, blackAfter - blackBefore, whiteAfter, blackAfter, added);
+    generate(whiteBefore - whiteAfter, blackBefore - blackAfter, whiteBefore, blackBefore, removed);
 }
 
 void PP_3Wide::append_changed_indices_both(Square                  white_ksq,
@@ -214,23 +214,23 @@ void PP_3Wide::append_changed_indices_both(Square                  white_ksq,
             black_out.push_back(black_index);
         };
 
-        const Bitboard unchanged = (pawnsW | pawnsB) & ~(updatedW | updatedB);
-        for (Bitboard updated = updatedW | updatedB; updated;)
+        const Bitboard unchanged = (pawnsW | pawnsB) - (updatedW | updatedB);
+        for (Bitboard updated = updatedW | updatedB; !updated.empty();)
         {
             const Square   from  = pop_lsb(updated);
             const Bitboard mask  = pawn_pair_bb(from) & (unchanged | updated);
-            const Color    color = (pawnsB & from) ? BLACK : WHITE;
+            const Color    color = pawnsB.contains(from) ? BLACK : WHITE;
 
-            for (Bitboard paired = pawnsB & mask; paired;)
-                push(color, from, pop_lsb(paired), BLACK);
-            for (Bitboard paired = pawnsW & mask; paired;)
-                push(color, from, pop_lsb(paired), WHITE);
+            for (Square paired : (pawnsB & mask))
+                push(color, from, paired, BLACK);
+            for (Square paired : (pawnsW & mask))
+                push(color, from, paired, WHITE);
         }
     };
 
-    generate(whiteAfter & ~whiteBefore, blackAfter & ~blackBefore, whiteAfter, blackAfter,
+    generate(whiteAfter - whiteBefore, blackAfter - blackBefore, whiteAfter, blackAfter,
              white_added, black_added);
-    generate(whiteBefore & ~whiteAfter, blackBefore & ~blackAfter, whiteBefore, blackBefore,
+    generate(whiteBefore - whiteAfter, blackBefore - blackAfter, whiteBefore, blackBefore,
              white_removed, black_removed);
 #endif
 }

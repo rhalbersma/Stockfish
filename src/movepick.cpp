@@ -169,7 +169,7 @@ MovePicker::MovePicker(const Position&              p,
     depth(d),
     ply(pl) {
 
-    if (pos.checkers())
+    if (!pos.checkers().empty())
         stage = EVASION_TT + !(ttm && pos.legal(ttm));
 
     else
@@ -183,7 +183,7 @@ MovePicker::MovePicker(const Position& p, Move ttm, int th, const CapturePieceTo
     captureHistory(cph),
     ttMove(ttm),
     threshold(th) {
-    assert(!pos.checkers());
+    assert(pos.checkers().empty());
 
     stage = PROBCUT_TT + !(ttm && pos.capture_stage(ttm) && pos.legal(ttm));
 }
@@ -201,12 +201,12 @@ ExtMove* MovePicker::score(const MoveList<Type>& ml) {
     [[maybe_unused]] Bitboard threatByLesser[KING + 1];
     if constexpr (Type == QUIETS)
     {
-        threatByLesser[PAWN]   = 0;
+        threatByLesser[PAWN]   = Bitboard{};
         threatByLesser[KNIGHT] = threatByLesser[BISHOP] = pos.threats_by(PAWN);
         threatByLesser[ROOK] =
           pos.threats_by(KNIGHT) | pos.threats_by(BISHOP) | threatByLesser[KNIGHT];
         threatByLesser[QUEEN] = pos.threats_by(ROOK) | threatByLesser[ROOK];
-        threatByLesser[KING]  = 0;
+        threatByLesser[KING]  = Bitboard{};
     }
 
     ExtMove* it = cur;
@@ -239,11 +239,11 @@ ExtMove* MovePicker::score(const MoveList<Type>& ml) {
             value += (*continuationHistory[5])[pc][to];
 
             // bonus for checks
-            value += ((pos.check_squares(pt) & to) && pos.see_ge(m, -75)) * 16384;
+            value += (pos.check_squares(pt).contains(to) && pos.see_ge(m, -75)) * 16384;
 
             // penalty for moving to a square threatened by a lesser piece
             // or bonus for escaping an attack by a lesser piece.
-            int v = 20 * (bool(threatByLesser[pt] & from) - bool(threatByLesser[pt] & to));
+            int v = 20 * (threatByLesser[pt].contains(from) - threatByLesser[pt].contains(to));
             value += PieceValue[pt] * v;
 
 

@@ -23,7 +23,9 @@
 #include <array>
 #include <cassert>
 #include <string>
-#include <type_traits>
+
+#include <xstd/bits/bit/bit_convert.hpp>
+#include <xstd/bits/bit_ranges/from_blocks.hpp>
 
 #include "types.h"
 #include "misc.h"
@@ -45,7 +47,7 @@ inline const __m512i AllSquares = _mm512_set_epi8(
 // clang-format on
 #endif
 
-constexpr Bitboard FileABB = 0x0101010101010101ULL;
+constexpr Bitboard FileABB(xstd::from_blocks, 0x0101010101010101ULL);
 constexpr Bitboard FileBBB = FileABB << 1;
 constexpr Bitboard FileCBB = FileABB << 2;
 constexpr Bitboard FileDBB = FileABB << 3;
@@ -54,7 +56,7 @@ constexpr Bitboard FileFBB = FileABB << 5;
 constexpr Bitboard FileGBB = FileABB << 6;
 constexpr Bitboard FileHBB = FileABB << 7;
 
-constexpr Bitboard Rank1BB = 0xFF;
+constexpr Bitboard Rank1BB(xstd::from_blocks, 0xFFULL);
 constexpr Bitboard Rank2BB = Rank1BB << (8 * 1);
 constexpr Bitboard Rank3BB = Rank1BB << (8 * 2);
 constexpr Bitboard Rank4BB = Rank1BB << (8 * 3);
@@ -63,28 +65,12 @@ constexpr Bitboard Rank6BB = Rank1BB << (8 * 5);
 constexpr Bitboard Rank7BB = Rank1BB << (8 * 6);
 constexpr Bitboard Rank8BB = Rank1BB << (8 * 7);
 
-constexpr Bitboard square_bb(Square s) {
-    assert(is_ok(s));
-    return 1ULL << s;
-}
+// A Square is a one-square Bitboard on either side of &, |, ^ and -, so only
+// the union of two squares needs an operator of its own.
 
+constexpr Bitboard operator|(Square s1, Square s2) { return Bitboard{s1, s2}; }
 
-// Overloads of bitwise operators between a Bitboard and a Square for testing
-// whether a given bit is set in a bitboard, and for setting and clearing bits.
-
-constexpr Bitboard  operator&(Bitboard b, Square s) { return b & square_bb(s); }
-constexpr Bitboard  operator|(Bitboard b, Square s) { return b | square_bb(s); }
-constexpr Bitboard  operator^(Bitboard b, Square s) { return b ^ square_bb(s); }
-constexpr Bitboard& operator|=(Bitboard& b, Square s) { return b |= square_bb(s); }
-constexpr Bitboard& operator^=(Bitboard& b, Square s) { return b ^= square_bb(s); }
-
-constexpr Bitboard operator&(Square s, Bitboard b) { return b & s; }
-constexpr Bitboard operator|(Square s, Bitboard b) { return b | s; }
-constexpr Bitboard operator^(Square s, Bitboard b) { return b ^ s; }
-
-constexpr Bitboard operator|(Square s1, Square s2) { return square_bb(s1) | s2; }
-
-constexpr bool more_than_one(Bitboard b) { return b & (b - 1); }
+constexpr bool more_than_one(Bitboard b) { return b.size() > 1; }
 
 
 // rank_bb() and file_bb() return a bitboard representing all the squares on
@@ -104,13 +90,13 @@ inline constexpr Bitboard shift(Bitboard b, Direction dir) {
          : dir == SOUTH         ? b >> 8
          : dir == NORTH + NORTH ? b << 16
          : dir == SOUTH + SOUTH ? b >> 16
-         : dir == EAST          ? (b & ~FileHBB) << 1
-         : dir == WEST          ? (b & ~FileABB) >> 1
-         : dir == NORTH_EAST    ? (b & ~FileHBB) << 9
-         : dir == NORTH_WEST    ? (b & ~FileABB) << 7
-         : dir == SOUTH_EAST    ? (b & ~FileHBB) >> 7
-         : dir == SOUTH_WEST    ? (b & ~FileABB) >> 9
-                                : 0;
+         : dir == EAST          ? (b - FileHBB) << 1
+         : dir == WEST          ? (b - FileABB) >> 1
+         : dir == NORTH_EAST    ? (b - FileHBB) << 9
+         : dir == NORTH_WEST    ? (b - FileABB) << 7
+         : dir == SOUTH_EAST    ? (b - FileHBB) >> 7
+         : dir == SOUTH_WEST    ? (b - FileABB) >> 9
+                                : Bitboard{};
 }
 
 
@@ -132,7 +118,7 @@ inline constexpr auto PawnPairBB = []() {
     {
         Bitboard file  = file_bb(s);
         Bitboard files = file | shift(file, EAST) | shift(file, WEST);
-        result[s]      = files & ~(Rank1BB | Rank8BB) & ~square_bb(s);
+        result[s]      = files - (Rank1BB | Rank8BB) - s;
     }
     return result;
 }();
@@ -144,34 +130,11 @@ constexpr Bitboard pawn_pair_bb(Square s) { return PawnPairBB[s]; }
 
 constexpr int edge_distance(File f) { return std::min(f, File(FILE_H - f)); }
 
-template<typename T>
-constexpr int constexpr_popcount(T v) {
-    static_assert(std::is_integral_v<T>, "constexpr_popcount is undefined for non-integral types");
+// The integer bit utilities below serve masks that are not bitboards, such as
+// the NNUE sparse input. A Bitboard counts and finds its squares itself.
 
-    if constexpr (sizeof(T) <= 8)
-    {
-        u64 b = static_cast<std::make_unsigned_t<T>>(v);
-
-        b = b - ((b >> 1) & 0x5555555555555555ULL);
-        b = (b & 0x3333333333333333ULL) + ((b >> 2) & 0x3333333333333333ULL);
-        b = (b + (b >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
-
-        return static_cast<int>((b * 0x0101010101010101ULL) >> 56);
-    }
-    else
-    {
-        int result = 0;
-
-        for (; v; v >>= static_cast<T>(1))
-            if (v & static_cast<T>(1))
-                ++result;
-
-        return result;
-    }
-}
-
-// Counts the number of non-zero bits in a bitboard.
-inline int popcount(Bitboard b) {
+// Counts the number of non-zero bits in a mask.
+inline int popcount(u64 b) {
 
 #ifdef _MSC_VER
 
@@ -184,8 +147,8 @@ inline int popcount(Bitboard b) {
 #endif
 }
 
-// Returns the least significant bit in a non-zero bitboard.
-inline Square lsb(Bitboard b) {
+// Returns the least significant bit in a non-zero mask.
+inline Square lsb(u64 b) {
     assert(b);
 
 #if defined(__GNUC__)  // GCC, Clang, ICX
@@ -218,8 +181,8 @@ inline Square lsb(Bitboard b) {
 #endif
 }
 
-// Returns the most significant bit in a non-zero bitboard.
-inline Square msb(Bitboard b) {
+// Returns the most significant bit in a non-zero mask.
+inline Square msb(u64 b) {
     assert(b);
 
 #if defined(__GNUC__)  // GCC, Clang, ICX
@@ -253,18 +216,19 @@ inline Square msb(Bitboard b) {
 #endif
 }
 
-// Returns the bitboard of the least significant
-// square of a non-zero bitboard. It is equivalent to square_bb(lsb(bb)).
-inline Bitboard least_significant_square_bb(Bitboard b) {
-    assert(b);
-    return b & -b;
-}
-
-// Finds and clears the least significant bit in a non-zero bitboard.
-inline Square pop_lsb(Bitboard& b) {
+// Finds and clears the least significant bit in a non-zero mask.
+inline Square pop_lsb(u64& b) {
     assert(b);
     const Square s = lsb(b);
     b &= b - 1;
+    return s;
+}
+
+// Finds and removes the lowest square of a non-empty bitboard.
+inline Square pop_lsb(Bitboard& b) {
+    assert(!b.empty());
+    const Square s = b.front();
+    b.erase(b.begin());
     return s;
 }
 

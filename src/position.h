@@ -202,7 +202,7 @@ class Position {
                               bool                putPiece,
                               Square              s,
                               DirtyThreats* const dts,
-                              Bitboard            noRaysContaining = -1ULL) const;
+                              Bitboard            noRaysContaining = ~Bitboard{}) const;
     void move_piece(Square from, Square to, DirtyThreats* const dts = nullptr);
     template<bool Do>
     void do_castling(Color               us,
@@ -273,7 +273,7 @@ inline int Position::count() const {
 template<PieceType Pt>
 inline Square Position::square(Color c) const {
     assert(count<Pt>(c) == 1);
-    return lsb(pieces(c, Pt));
+    return pieces(c, Pt).front();
 }
 
 inline Square Position::ep_square() const { return st->epSquare; }
@@ -282,7 +282,7 @@ inline bool Position::can_castle(CastlingRights cr) const { return st->castlingR
 
 inline bool Position::castling_impeded(CastlingRights cr) const {
     assert(cr == WHITE_OO || cr == WHITE_OOO || cr == BLACK_OO || cr == BLACK_OOO);
-    return pieces() & castlingPath[cr];
+    return !(pieces() & castlingPath[cr]).empty();
 }
 
 inline Square Position::castling_rook_square(CastlingRights cr) const {
@@ -300,16 +300,15 @@ inline Bitboard Position::xattacks_by(PieceType pt, Color c, Bitboard occupied) 
                           : pawn_attacks_bb<BLACK>(pieces(BLACK, PAWN));
     else
     {
-        Bitboard threats   = 0;
-        Bitboard attackers = pieces(c, pt);
-        while (attackers)
-            threats |= Attacks::attacks_bb(pt, pop_lsb(attackers), occupied);
+        Bitboard threats;
+        for (Square s : pieces(c, pt))
+            threats |= Attacks::attacks_bb(pt, s, occupied);
         return threats;
     }
 }
 
 inline Bitboard Position::threats_by(PieceType pt) const {
-    if (!st->threats[ALL_PIECES])
+    if (st->threats[ALL_PIECES].empty())
         compute_threats();
     return st->threats[pt];
 }
@@ -351,7 +350,7 @@ inline bool Position::is_chess960() const { return chess960; }
 
 inline bool Position::dtz_is_dtm() const {
     return !count<PAWN>()
-        && (count<ALL_PIECES>() == 3 || (count<ALL_PIECES>() == 4 && !pieces(QUEEN, ROOK)));
+        && (count<ALL_PIECES>() == 3 || (count<ALL_PIECES>() == 4 && pieces(QUEEN, ROOK).empty()));
 }
 
 inline bool Position::capture(Move m) const {
