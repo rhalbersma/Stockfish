@@ -1689,6 +1689,12 @@ moves_loop:  // When in check, search starts here
 }
 
 
+// Quiescence search with window w, classifying its value as a result window at a single exit
+template<NodeType nodeType>
+Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
+    return to_window(qsearch_value<nodeType>(pos, ss, w), w);
+}
+
 // Quiescence search function, which is called by the main search function with
 // depth zero, or recursively with further decreasing depth. With depth <= 0, we
 // "should" be using static eval only, but tactical moves may confuse the static eval.
@@ -1696,7 +1702,7 @@ moves_loop:  // When in check, search starts here
 // See https://www.chessprogramming.org/Horizon_Effect
 // and https://www.chessprogramming.org/Quiescence_Search
 template<NodeType nodeType>
-Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
+Value Search::Worker::qsearch_value(Position& pos, Stack* ss, Window w) {
 
     static_assert(nodeType != Root);
     constexpr bool PvNode = nodeType == PV;
@@ -1709,7 +1715,7 @@ Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
     {
         w.me = value_draw(nodes);
         if (w.me + w.opp >= 0)
-            return to_window(w.me, w);
+            return w.me;
     }
 
     PVMoves   pv;
@@ -1738,7 +1744,7 @@ Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
 
     // Step 2. Check for an immediate draw or maximum ply reached
     if (pos.is_draw(ss->ply) || ss->ply >= MAX_PLY)
-        return to_window((ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : VALUE_DRAW, w);
+        return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : VALUE_DRAW;
 
     assert(0 <= ss->ply && ss->ply < MAX_PLY);
 
@@ -1754,7 +1760,7 @@ Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
     // At non-PV nodes we check for an early TT cutoff
     if (!PvNode && ttData.depth >= DEPTH_QS && is_valid(ttData.value)
         && (ttData.bound & (ttData.value >= -w.opp ? BOUND_LOWER : BOUND_UPPER)))
-        return to_window(ttData.value, w);
+        return ttData.value;
 
     // Step 4. Static evaluation of the position
     Value unadjustedStaticEval = VALUE_NONE;
@@ -1796,7 +1802,7 @@ Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
             if (!ss->ttHit)
                 ttWriter.write(posKey, VALUE_NONE, false, BOUND_LOWER, DEPTH_UNSEARCHED,
                                Move::none(), unadjustedStaticEval, tt.generation());
-            return to_window(bestValue, w);
+            return bestValue;
         }
 
         if (bestValue > w.me)
@@ -1900,7 +1906,7 @@ Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
         if (ss->inCheck)  // Checkmate!
         {
             assert(!MoveList<ALL>(pos).size());
-            return to_window(mated_in(ss->ply), w);  // Plies to mate from the root
+            return mated_in(ss->ply);  // Plies to mate from the root
         }
 
         // Only check for stalemate under specific conditions
@@ -1924,7 +1930,7 @@ Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
 
     // The search is now complete
     assert(-VALUE_INFINITE < bestValue && bestValue < VALUE_INFINITE);
-    return result;
+    return bestValue;
 }
 
 int Search::Worker::reduction(bool i, Depth d, int mn) const {

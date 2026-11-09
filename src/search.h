@@ -362,6 +362,8 @@ class Worker {
     // Quiescence search function, which is called by the main search
     template<NodeType nodeType>
     Window qsearch(Position& pos, Stack* ss, Window w);
+    template<NodeType nodeType>
+    Value qsearch_value(Position& pos, Stack* ss, Window w);
 
     int reduction(bool i, Depth d, int mn) const;
 
