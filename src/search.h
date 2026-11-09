@@ -355,11 +355,11 @@ class Worker {
 
     // This is the main search function, for both PV and non-PV nodes
     template<NodeType nodeType>
-    Value search(Position& pos, Stack* ss, Window w, Depth depth, const bool cutNode);
+    Window search(Position& pos, Stack* ss, Window w, Depth depth, const bool cutNode);
 
     // Quiescence search function, which is called by the main search
     template<NodeType nodeType>
-    Value qsearch(Position& pos, Stack* ss, Window w);
+    Window qsearch(Position& pos, Stack* ss, Window w);
 
     int reduction(bool i, Depth d, int mn) const;
 

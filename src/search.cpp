@@ -406,7 +406,7 @@ bool Search::Worker::iterative_deepening() {
                 // effective increment for every four searchAgain steps (see issue #2717).
                 Depth adjustedDepth = std::max(1, rootDepth - failedHighCnt - failHighRecovery
                                                     - 3 * (searchAgainCounter + 1) / 4);
-                bestValue           = search<Root>(rootPos, ss, w, adjustedDepth, false);
+                bestValue           = to_value(search<Root>(rootPos, ss, w, adjustedDepth, false));
 
                 // Bring the best move to the front. It is critical that sorting
                 // is done with a stable algorithm because all the values but the
@@ -736,7 +736,7 @@ void Search::Worker::clear() {
 
 // Main search function for both PV and non-PV nodes
 template<NodeType nodeType>
-Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, const bool cutNode) {
+Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, const bool cutNode) {
 
     constexpr bool PvNode   = nodeType != NonPV;
     constexpr bool rootNode = nodeType == Root;
@@ -754,7 +754,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
     {
         w.me = value_draw(nodes);
         if (w.me + w.opp >= 0)
-            return w.me;
+            return to_window(w.me, w);
     }
 
     assert(-VALUE_INFINITE <= w.me && w.me + w.opp < 0 && w.opp >= -VALUE_INFINITE);
@@ -803,7 +803,8 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
         // Step 2. Check for aborted search or immediate draw
         if (threads.stop.load(std::memory_order_relaxed) || pos.is_draw(ss->ply)
             || ss->ply >= MAX_PLY)
-            return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : value_draw(nodes);
+            return to_window(
+              (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : value_draw(nodes), w);
 
         // Step 3. Mate distance pruning. Even if we mate at the next move our score
         // would be at best mate_in(ss->ply + 1), but if alpha is already bigger because
@@ -813,7 +814,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
         w.me  = std::max(mated_in(ss->ply), w.me);
         w.opp = std::max(mated_in(ss->ply + 1), w.opp);
         if (w.me + w.opp >= 0)
-            return w.me;
+            return to_window(w.me, w);
     }
 
     assert(0 <= ss->ply && ss->ply < MAX_PLY);
@@ -921,13 +922,13 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
 
                     // Check that the ttValue after the tt move would also trigger a cutoff
                     if (!is_valid(ttDataNext.value))
-                        return ttData.value;
+                        return to_window(ttData.value, w);
 
                     if ((ttData.value >= -w.opp) == (ttDataNext.value <= w.opp))
-                        return ttData.value;
+                        return to_window(ttData.value, w);
                 }
                 else
-                    return ttData.value;
+                    return to_window(ttData.value, w);
             }
         }
         // Case B: No cutoff, but depth was sufficient, so the bound points the wrong way.
@@ -981,7 +982,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
                                    std::min(MAX_PLY - 1, depth + 6), Move::none(), VALUE_NONE,
                                    tt.generation());
 
-                    return value;
+                    return to_window(value, w);
                 }
 
                 if (PvNode)
@@ -1027,7 +1028,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
                              + std::abs(correctionValue) / 198435;
 
         if (eval - futilityMargin >= -w.opp)
-            return (363 * eval - 661 * w.opp) / 1024;
+            return to_window((363 * eval - 661 * w.opp) / 1024, w);
     }
 
     // Step 10. Null move search with verification search
@@ -1042,7 +1043,8 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
         R -= seekMate * R / 2;
         do_null_move(pos, st, ss);
 
-        Value nullValue = -search<NonPV>(pos, ss + 1, swap(scout_opp(w)), depth - R, false);
+        Value nullValue =
+          to_value(swap(search<NonPV>(pos, ss + 1, swap(scout_opp(w)), depth - R, false)));
 
         undo_null_move(pos);
 
@@ -1052,7 +1054,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
             if (nmpMinPly || depth < 16)
             {
                 ++ss->priorNMPFailHigh;
-                return nullValue;
+                return to_window(nullValue, w);
             }
 
             // Recursive verification is not allowed
@@ -1062,14 +1064,14 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
             // disabled until ply exceeds nmpMinPly.
             nmpMinPly = ss->ply + 3 * (depth - R) / 4;
 
-            Value v = search<NonPV>(pos, ss, scout_opp(w), depth - R, false);
+            Value v = to_value(search<NonPV>(pos, ss, scout_opp(w), depth - R, false));
 
             nmpMinPly = 0;
 
             if (v >= -w.opp)
             {
                 ++ss->priorNMPFailHigh;
-                return nullValue;
+                return to_window(nullValue, w);
             }
         }
     }
@@ -1106,12 +1108,13 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
 
             do_move(pos, move, st, pos.gives_check(move), capture, ss);
             // Perform a preliminary qsearch to verify that the move holds
-            value = -qsearch<NonPV>(pos, ss + 1, swap({probCutBeta - 1, -probCutBeta}));
+            value =
+              to_value(swap(qsearch<NonPV>(pos, ss + 1, swap({probCutBeta - 1, -probCutBeta}))));
 
             // If the qsearch held, perform the regular search
             if (value >= probCutBeta && probCutDepth > 0)
-                value = -search<NonPV>(pos, ss + 1, swap({probCutBeta - 1, -probCutBeta}),
-                                       probCutDepth, !cutNode);
+                value = to_value(swap(search<NonPV>(
+                  pos, ss + 1, swap({probCutBeta - 1, -probCutBeta}), probCutDepth, !cutNode)));
 
             undo_move(pos, move);
 
@@ -1122,7 +1125,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
                                probCutDepth + 1, move, unadjustedStaticEval, tt.generation());
 
                 if (!is_decisive(value))
-                    return value - (probCutBeta + w.opp);
+                    return to_window(value - (probCutBeta + w.opp), w);
             }
         }
     }
@@ -1133,7 +1136,7 @@ moves_loop:  // When in check, search starts here
     probCutBeta = -w.opp + 428;
     if ((ttData.bound & BOUND_LOWER) && ttData.depth >= depth - 4 && ttData.value >= probCutBeta
         && !is_decisive(w.opp) && is_valid(ttData.value) && !is_decisive(ttData.value) && !seekMate)
-        return probCutBeta;
+        return to_window(probCutBeta, w);
 
     const PieceToHistory* contHist[] = {
       (ss - 1)->continuationHistory, (ss - 2)->continuationHistory, (ss - 3)->continuationHistory,
@@ -1278,8 +1281,8 @@ moves_loop:  // When in check, search starts here
             Depth singularDepth = newDepth / 2;
 
             ss->excludedMove = move;
-            value =
-              search<NonPV>(pos, ss, {singularBeta - 1, -singularBeta}, singularDepth, cutNode);
+            value            = to_value(
+              search<NonPV>(pos, ss, {singularBeta - 1, -singularBeta}, singularDepth, cutNode));
             ss->excludedMove = Move::none();
 
             if (value < singularBeta)
@@ -1314,7 +1317,7 @@ moves_loop:  // When in check, search starts here
                     update_correction_history(pos, ss, *this, bonus);
                 }
 
-                return value;
+                return to_window(value, w);
             }
 
             // Negative extensions
@@ -1401,7 +1404,7 @@ moves_loop:  // When in check, search starts here
               std::max(1, newDepth + std::min(-r / 1024, ss->ply < 2 * rootDepth ? 2 : 0)) + PvNode;
 
             ss->reduction = newDepth - d;
-            value         = -search<NonPV>(pos, ss + 1, swap(scout_me(w)), d, true);
+            value         = to_value(swap(search<NonPV>(pos, ss + 1, swap(scout_me(w)), d, true)));
             ss->reduction = 0;
 
             // Do a full-depth search when reduced LMR search fails high
@@ -1416,7 +1419,8 @@ moves_loop:  // When in check, search starts here
                 newDepth += doDeeperSearch - doShallowerSearch;
 
                 if (newDepth > d)
-                    value = -search<NonPV>(pos, ss + 1, swap(scout_me(w)), newDepth, !cutNode);
+                    value = to_value(
+                      swap(search<NonPV>(pos, ss + 1, swap(scout_me(w)), newDepth, !cutNode)));
 
                 // Post LMR continuation history updates
                 update_continuation_histories(ss, movedPiece, move.to_sq(), 1334);
@@ -1431,8 +1435,9 @@ moves_loop:  // When in check, search starts here
                 r += 1127;
 
             // If expected reduction is high, we reduce search depth here
-            value = -search<NonPV>(pos, ss + 1, swap(scout_me(w)),
-                                   newDepth - (r > 5234) - (r > 5487 && newDepth > 2), !cutNode);
+            value = to_value(
+              swap(search<NonPV>(pos, ss + 1, swap(scout_me(w)),
+                                 newDepth - (r > 5234) - (r > 5487 && newDepth > 2), !cutNode)));
         }
 
         // Step 20. For PV nodes only, do a full PV search on the first move
@@ -1451,7 +1456,7 @@ moves_loop:  // When in check, search starts here
                     || ttData.depth > 1))
                 newDepth = std::max(newDepth, 1);
 
-            value = -search<PV>(pos, ss + 1, swap(w), newDepth, false);
+            value = to_value(swap(search<PV>(pos, ss + 1, swap(w), newDepth, false)));
         }
 
         // Step 21. Undo move
@@ -1464,7 +1469,7 @@ moves_loop:  // When in check, search starts here
         // and we return immediately without updating the best move,
         // principal variation or transposition table.
         if (threads.stop.load(std::memory_order_relaxed))
-            return VALUE_ZERO;
+            return to_window(VALUE_ZERO, w);
 
         if (rootNode)
         {
@@ -1650,13 +1655,14 @@ moves_loop:  // When in check, search starts here
     if (bestValue <= w.me)
         ss->ttPv = ss->ttPv || (ss - 1)->ttPv;
 
+    Window result = bestValue >= -w.opp ? Window{bestValue, -VALUE_INFINITE}
+                  : PvNode && bestMove  ? Window{bestValue, -bestValue}
+                                        : Window{-VALUE_INFINITE, -bestValue};
+
     // Step 24. Write gathered information in transposition table. Note that the
     // static evaluation is saved as it was before correction history.
     if (!excludedMove && !(rootNode && pvIdx))
-        ttWriter.write(posKey, value_to_tt(bestValue, ss->ply), ss->ttPv,
-                       bestValue >= -w.opp  ? BOUND_LOWER
-                       : PvNode && bestMove ? BOUND_EXACT
-                                            : BOUND_UPPER,
+        ttWriter.write(posKey, value_to_tt(bestValue, ss->ply), ss->ttPv, to_bound(result),
                        moveCount != 0 ? depth : std::min(MAX_PLY - 1, depth + 6), bestMove,
                        unadjustedStaticEval, tt.generation());
 
@@ -1673,7 +1679,7 @@ moves_loop:  // When in check, search starts here
 
     // The search is now complete
     assert(-VALUE_INFINITE < bestValue && bestValue < VALUE_INFINITE);
-    return bestValue;
+    return result;
 }
 
 
@@ -1684,7 +1690,7 @@ moves_loop:  // When in check, search starts here
 // See https://www.chessprogramming.org/Horizon_Effect
 // and https://www.chessprogramming.org/Quiescence_Search
 template<NodeType nodeType>
-Value Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
+Window Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
 
     static_assert(nodeType != Root);
     constexpr bool PvNode = nodeType == PV;
@@ -1697,7 +1703,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
     {
         w.me = value_draw(nodes);
         if (w.me + w.opp >= 0)
-            return w.me;
+            return to_window(w.me, w);
     }
 
     PVMoves   pv;
@@ -1726,7 +1732,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
 
     // Step 2. Check for an immediate draw or maximum ply reached
     if (pos.is_draw(ss->ply) || ss->ply >= MAX_PLY)
-        return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : VALUE_DRAW;
+        return to_window((ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : VALUE_DRAW, w);
 
     assert(0 <= ss->ply && ss->ply < MAX_PLY);
 
@@ -1742,7 +1748,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
     // At non-PV nodes we check for an early TT cutoff
     if (!PvNode && ttData.depth >= DEPTH_QS && is_valid(ttData.value)
         && (ttData.bound & (ttData.value >= -w.opp ? BOUND_LOWER : BOUND_UPPER)))
-        return ttData.value;
+        return to_window(ttData.value, w);
 
     // Step 4. Static evaluation of the position
     Value unadjustedStaticEval = VALUE_NONE;
@@ -1784,7 +1790,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
             if (!ss->ttHit)
                 ttWriter.write(posKey, VALUE_NONE, false, BOUND_LOWER, DEPTH_UNSEARCHED,
                                Move::none(), unadjustedStaticEval, tt.generation());
-            return bestValue;
+            return to_window(bestValue, w);
         }
 
         if (bestValue > w.me)
@@ -1854,7 +1860,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
         // Step 7. Make and search the move
         do_move(pos, move, st, givesCheck, capture, ss);
 
-        value = -qsearch<nodeType>(pos, ss + 1, swap(w));
+        value = to_value(swap(qsearch<nodeType>(pos, ss + 1, swap(w))));
         undo_move(pos, move);
 
         assert(value > -VALUE_INFINITE && value < VALUE_INFINITE);
@@ -1888,7 +1894,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
         if (ss->inCheck)  // Checkmate!
         {
             assert(!MoveList<ALL>(pos).size());
-            return mated_in(ss->ply);  // Plies to mate from the root
+            return to_window(mated_in(ss->ply), w);  // Plies to mate from the root
         }
 
         // Only check for stalemate under specific conditions
@@ -1902,15 +1908,17 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Window w) {
     if (!is_decisive(bestValue) && bestValue > -w.opp)
         bestValue = (462 * bestValue - 562 * w.opp) / 1024;
 
+    Window result = to_window(bestValue, w);
+
     // Step 10. Save gathered info in transposition table. The static evaluation
     // is saved as it was before adjustment by correction history.
     ttWriter.write(posKey, value_to_tt(bestValue, ss->ply), pvHit,
-                   bestValue >= -w.opp ? BOUND_LOWER : BOUND_UPPER, DEPTH_QS, bestMove,
+                   result.opp == -VALUE_INFINITE ? BOUND_LOWER : BOUND_UPPER, DEPTH_QS, bestMove,
                    unadjustedStaticEval, tt.generation());
 
     // The search is now complete
     assert(-VALUE_INFINITE < bestValue && bestValue < VALUE_INFINITE);
-    return bestValue;
+    return result;
 }
 
 int Search::Worker::reduction(bool i, Depth d, int mn) const {

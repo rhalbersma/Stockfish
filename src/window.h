@@ -39,6 +39,25 @@ constexpr Window scout_me(Window w) { return {w.me, -1 - w.me}; }
 // Zero window testing whether we can reach the opponent's guarantee (beta - 1, beta)
 constexpr Window scout_opp(Window w) { return {-1 - w.opp, w.opp}; }
 
+// The result of a search with window w that found value v, as a window from the
+// searching side's perspective: exact {v, -v}, fail high {v, -VALUE_INFINITE},
+// fail low {-VALUE_INFINITE, -v}.
+constexpr Window to_window(Value v, Window w) {
+    return v >= -w.opp ? Window{v, -VALUE_INFINITE}
+         : v <= w.me   ? Window{-VALUE_INFINITE, -v}
+                       : Window{v, -v};
+}
+
+// The value of a search result, from the perspective of its `me` side
+constexpr Value to_value(Window r) { return r.me != -VALUE_INFINITE ? r.me : -r.opp; }
+
+// The transposition table bound of a search result
+constexpr Bound to_bound(Window r) {
+    return r.opp == -VALUE_INFINITE ? BOUND_LOWER
+         : r.me == -VALUE_INFINITE  ? BOUND_UPPER
+                                    : BOUND_EXACT;
+}
+
 }  // namespace Stockfish
 
 #endif  // #ifndef WINDOW_H_INCLUDED
