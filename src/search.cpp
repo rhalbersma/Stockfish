@@ -1042,7 +1042,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
         R -= seekMate * R / 2;
         do_null_move(pos, st, ss);
 
-        Value nullValue = -search<NonPV>(pos, ss + 1, {w.opp, -w.opp - 1}, depth - R, false);
+        Value nullValue = -search<NonPV>(pos, ss + 1, swap(scout_opp(w)), depth - R, false);
 
         undo_null_move(pos);
 
@@ -1062,7 +1062,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
             // disabled until ply exceeds nmpMinPly.
             nmpMinPly = ss->ply + 3 * (depth - R) / 4;
 
-            Value v = search<NonPV>(pos, ss, {-w.opp - 1, w.opp}, depth - R, false);
+            Value v = search<NonPV>(pos, ss, scout_opp(w), depth - R, false);
 
             nmpMinPly = 0;
 
@@ -1106,12 +1106,12 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
 
             do_move(pos, move, st, pos.gives_check(move), capture, ss);
             // Perform a preliminary qsearch to verify that the move holds
-            value = -qsearch<NonPV>(pos, ss + 1, {-probCutBeta, probCutBeta - 1});
+            value = -qsearch<NonPV>(pos, ss + 1, swap({probCutBeta - 1, -probCutBeta}));
 
             // If the qsearch held, perform the regular search
             if (value >= probCutBeta && probCutDepth > 0)
-                value = -search<NonPV>(pos, ss + 1, {-probCutBeta, probCutBeta - 1}, probCutDepth,
-                                       !cutNode);
+                value = -search<NonPV>(pos, ss + 1, swap({probCutBeta - 1, -probCutBeta}),
+                                       probCutDepth, !cutNode);
 
             undo_move(pos, move);
 

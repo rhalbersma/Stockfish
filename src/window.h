@@ -36,6 +36,9 @@ constexpr Window swap(Window w) { return {w.opp, w.me}; }
 // Zero window testing whether we can raise our own guarantee (alpha, alpha + 1)
 constexpr Window scout_me(Window w) { return {w.me, -1 - w.me}; }
 
+// Zero window testing whether we can reach the opponent's guarantee (beta - 1, beta)
+constexpr Window scout_opp(Window w) { return {-1 - w.opp, w.opp}; }
+
 }  // namespace Stockfish
 
 #endif  // #ifndef WINDOW_H_INCLUDED
