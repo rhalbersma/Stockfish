@@ -1,0 +1,63 @@
+/*
+  Stockfish, a UCI chess playing engine derived from Glaurung 2.1
+  Copyright (C) 2004-2026 The Stockfish developers (see AUTHORS file)
+
+  Stockfish is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  Stockfish is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#ifndef WINDOW_H_INCLUDED
+#define WINDOW_H_INCLUDED
+
+#include "types.h"
+
+namespace Stockfish {
+
+// A search window as a pair of guarantees, each from its own side's perspective:
+// `me` is the value the side to move is already guaranteed (alpha), and `opp` is
+// the value the opponent is already guaranteed (-beta). Passing a window to the
+// child node is a plain swap, with no negation of values.
+struct Window {
+    Value me, opp;
+};
+
+constexpr Window swap(Window w) { return {w.opp, w.me}; }
+
+// Zero window testing whether we can raise our own guarantee (alpha, alpha + 1)
+constexpr Window scout_me(Window w) { return {w.me, -1 - w.me}; }
+
+// Zero window testing whether we can reach the opponent's guarantee (beta - 1, beta)
+constexpr Window scout_opp(Window w) { return {-1 - w.opp, w.opp}; }
+
+// The result of a search with window w that found value v, as a window from the
+// searching side's perspective: exact {v, -v}, fail high {v, -VALUE_INFINITE},
+// fail low {-VALUE_INFINITE, -v}.
+constexpr Window to_window(Value v, Window w) {
+    return v >= -w.opp ? Window{v, -VALUE_INFINITE}
+         : v <= w.me   ? Window{-VALUE_INFINITE, -v}
+                       : Window{v, -v};
+}
+
+// The value of a search result, from the perspective of its `me` side
+constexpr Value to_value(Window r) { return r.me != -VALUE_INFINITE ? r.me : -r.opp; }
+
+// The transposition table bound of a search result
+constexpr Bound to_bound(Window r) {
+    return r.opp == -VALUE_INFINITE ? BOUND_LOWER
+         : r.me == -VALUE_INFINITE  ? BOUND_UPPER
+                                    : BOUND_EXACT;
+}
+
+}  // namespace Stockfish
+
+#endif  // #ifndef WINDOW_H_INCLUDED
