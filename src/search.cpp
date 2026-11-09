@@ -289,7 +289,7 @@ bool Search::Worker::iterative_deepening() {
     Depth       lastBestMoveDepth = 0;
     Value       lastBestMoveScore = -VALUE_INFINITE;
 
-    Value  alpha, beta;
+    Window w;
     Value  bestValue     = -VALUE_INFINITE;
     Color  us            = rootPos.side_to_move();
     double timeReduction = 1, totBestMoveChanges = 0;
@@ -385,8 +385,8 @@ bool Search::Worker::iterative_deepening() {
             // Reset aspiration window starting size
             delta     = 5 + threadIdx % 8 + std::abs(rootMoves[pvIdx].meanSquaredScore) / 10193;
             Value avg = rootMoves[pvIdx].averageScore;
-            alpha     = std::max(avg - delta, -VALUE_INFINITE);
-            beta      = std::min(avg + delta, VALUE_INFINITE);
+            w.me      = std::max(avg - delta, -VALUE_INFINITE);
+            w.opp     = std::max(-avg - delta, -VALUE_INFINITE);
 
             // Do not tune these values. They are not intended for playing strength.
             seekMate = std::abs(rootMoves[pvIdx].score) >= 750 + 220000 / (rootDepth * rootDepth);
@@ -406,7 +406,7 @@ bool Search::Worker::iterative_deepening() {
                 // effective increment for every four searchAgain steps (see issue #2717).
                 Depth adjustedDepth = std::max(1, rootDepth - failedHighCnt - failHighRecovery
                                                     - 3 * (searchAgainCounter + 1) / 4);
-                bestValue = search<Root>(rootPos, ss, {alpha, -beta}, adjustedDepth, false);
+                bestValue           = search<Root>(rootPos, ss, w, adjustedDepth, false);
 
                 // Bring the best move to the front. It is critical that sorting
                 // is done with a stable algorithm because all the values but the
@@ -425,25 +425,25 @@ bool Search::Worker::iterative_deepening() {
                 // When failing high/low give some update before a re-search. To avoid
                 // excessive output that could hang GUIs like Fritz 19, only start
                 // at nodes > 10M (rather than depth N, which can be reached quickly).
-                if (mainThread && multiPV == 1 && (bestValue <= alpha || bestValue >= beta)
+                if (mainThread && multiPV == 1 && (bestValue <= w.me || bestValue >= -w.opp)
                     && nodes > NODES_LIMIT_OUTPUT)
                     main_manager()->output_pv(*this, threads, tt, rootDepth);
 
                 // In case of failing low/high increase aspiration window and re-search,
                 // otherwise exit the loop.
-                if (bestValue <= alpha)
+                if (bestValue <= w.me)
                 {
-                    beta  = alpha;
-                    alpha = std::max(bestValue - delta, -VALUE_INFINITE);
+                    w.opp = -w.me;
+                    w.me  = std::max(bestValue - delta, -VALUE_INFINITE);
 
                     failedHighCnt = 0;
                     if (mainThread)
                         mainThread->stopOnPonderhit = false;
                 }
-                else if (bestValue >= beta)
+                else if (bestValue >= -w.opp)
                 {
-                    alpha = std::max(beta - delta, alpha);
-                    beta  = std::min(bestValue + delta, VALUE_INFINITE);
+                    w.me  = std::max(-w.opp - delta, w.me);
+                    w.opp = std::max(-bestValue - delta, -VALUE_INFINITE);
                     ++failedHighCnt;
                 }
                 else
@@ -451,7 +451,7 @@ bool Search::Worker::iterative_deepening() {
 
                 delta += 47 * delta / 128;
 
-                assert(alpha >= -VALUE_INFINITE && beta <= VALUE_INFINITE);
+                assert(w.me >= -VALUE_INFINITE && w.opp >= -VALUE_INFINITE);
             }
 
             // Gradually increase depth after reduced depth search
@@ -811,7 +811,7 @@ Value Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, co
         // because we will never beat the current alpha. Equal and opposite logic applies
         // when being mated. In either case, return a fail-high score.
         w.me  = std::max(mated_in(ss->ply), w.me);
-        w.opp = -std::min(mate_in(ss->ply + 1), -w.opp);
+        w.opp = std::max(mated_in(ss->ply + 1), w.opp);
         if (w.me + w.opp >= 0)
             return w.me;
     }
