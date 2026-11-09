@@ -734,9 +734,16 @@ void Search::Worker::clear() {
 }
 
 
-// Main search function for both PV and non-PV nodes
+// Search with window w and classify its value as a result window, at a single exit
 template<NodeType nodeType>
 Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, const bool cutNode) {
+    return to_window(search_value<nodeType>(pos, ss, w, depth, cutNode), w);
+}
+
+// Main search function for both PV and non-PV nodes
+template<NodeType nodeType>
+Value Search::Worker::search_value(
+  Position& pos, Stack* ss, Window w, Depth depth, const bool cutNode) {
 
     constexpr bool PvNode   = nodeType != NonPV;
     constexpr bool rootNode = nodeType == Root;
@@ -744,7 +751,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
 
     // Dive into quiescence search when the depth reaches zero
     if (depth <= 0)
-        return qsearch<PvNode ? PV : NonPV>(pos, ss, w);
+        return to_value(qsearch<PvNode ? PV : NonPV>(pos, ss, w));
 
     // Limit the depth if extensions made it too large
     depth = std::min(depth, MAX_PLY - 1);
@@ -754,7 +761,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
     {
         w.me = value_draw(nodes);
         if (w.me + w.opp >= 0)
-            return to_window(w.me, w);
+            return w.me;
     }
 
     assert(-VALUE_INFINITE <= w.me && w.me + w.opp < 0 && w.opp >= -VALUE_INFINITE);
@@ -803,8 +810,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
         // Step 2. Check for aborted search or immediate draw
         if (threads.stop.load(std::memory_order_relaxed) || pos.is_draw(ss->ply)
             || ss->ply >= MAX_PLY)
-            return to_window(
-              (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : value_draw(nodes), w);
+            return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : value_draw(nodes);
 
         // Step 3. Mate distance pruning. Even if we mate at the next move our score
         // would be at best mate_in(ss->ply + 1), but if alpha is already bigger because
@@ -814,7 +820,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
         w.me  = std::max(mated_in(ss->ply), w.me);
         w.opp = std::max(mated_in(ss->ply + 1), w.opp);
         if (w.me + w.opp >= 0)
-            return to_window(w.me, w);
+            return w.me;
     }
 
     assert(0 <= ss->ply && ss->ply < MAX_PLY);
@@ -922,13 +928,13 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
 
                     // Check that the ttValue after the tt move would also trigger a cutoff
                     if (!is_valid(ttDataNext.value))
-                        return to_window(ttData.value, w);
+                        return ttData.value;
 
                     if ((ttData.value >= -w.opp) == (ttDataNext.value <= w.opp))
-                        return to_window(ttData.value, w);
+                        return ttData.value;
                 }
                 else
-                    return to_window(ttData.value, w);
+                    return ttData.value;
             }
         }
         // Case B: No cutoff, but depth was sufficient, so the bound points the wrong way.
@@ -982,7 +988,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
                                    std::min(MAX_PLY - 1, depth + 6), Move::none(), VALUE_NONE,
                                    tt.generation());
 
-                    return to_window(value, w);
+                    return value;
                 }
 
                 if (PvNode)
@@ -1013,7 +1019,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
     // Step 8. Razoring
     // If eval is really low, skip search entirely and return the qsearch value
     if (allNode && eval < w.me - 342 * depth && !seekMate)
-        return qsearch<NonPV>(pos, ss, w);
+        return to_value(qsearch<NonPV>(pos, ss, w));
 
     // Step 9. Futility pruning: child node
     // The depth condition is important for mate finding. It should NOT be tuned.
@@ -1028,7 +1034,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
                              + std::abs(correctionValue) / 198435;
 
         if (eval - futilityMargin >= -w.opp)
-            return to_window((363 * eval - 661 * w.opp) / 1024, w);
+            return (363 * eval - 661 * w.opp) / 1024;
     }
 
     // Step 10. Null move search with verification search
@@ -1054,7 +1060,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
             if (nmpMinPly || depth < 16)
             {
                 ++ss->priorNMPFailHigh;
-                return to_window(nullValue, w);
+                return nullValue;
             }
 
             // Recursive verification is not allowed
@@ -1071,7 +1077,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
             if (v >= -w.opp)
             {
                 ++ss->priorNMPFailHigh;
-                return to_window(nullValue, w);
+                return nullValue;
             }
         }
     }
@@ -1125,7 +1131,7 @@ Window Search::Worker::search(Position& pos, Stack* ss, Window w, Depth depth, c
                                probCutDepth + 1, move, unadjustedStaticEval, tt.generation());
 
                 if (!is_decisive(value))
-                    return to_window(value - (probCutBeta + w.opp), w);
+                    return value - (probCutBeta + w.opp);
             }
         }
     }
@@ -1136,7 +1142,7 @@ moves_loop:  // When in check, search starts here
     probCutBeta = -w.opp + 428;
     if ((ttData.bound & BOUND_LOWER) && ttData.depth >= depth - 4 && ttData.value >= probCutBeta
         && !is_decisive(w.opp) && is_valid(ttData.value) && !is_decisive(ttData.value) && !seekMate)
-        return to_window(probCutBeta, w);
+        return probCutBeta;
 
     const PieceToHistory* contHist[] = {
       (ss - 1)->continuationHistory, (ss - 2)->continuationHistory, (ss - 3)->continuationHistory,
@@ -1317,7 +1323,7 @@ moves_loop:  // When in check, search starts here
                     update_correction_history(pos, ss, *this, bonus);
                 }
 
-                return to_window(value, w);
+                return value;
             }
 
             // Negative extensions
@@ -1469,7 +1475,7 @@ moves_loop:  // When in check, search starts here
         // and we return immediately without updating the best move,
         // principal variation or transposition table.
         if (threads.stop.load(std::memory_order_relaxed))
-            return to_window(VALUE_ZERO, w);
+            return VALUE_ZERO;
 
         if (rootNode)
         {
@@ -1679,7 +1685,7 @@ moves_loop:  // When in check, search starts here
 
     // The search is now complete
     assert(-VALUE_INFINITE < bestValue && bestValue < VALUE_INFINITE);
-    return result;
+    return bestValue;
 }
 
 
